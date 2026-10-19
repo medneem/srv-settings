@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# Pure/mocked tests: NEVER configure the host running these tests.
+set -euo pipefail
+BASE_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd)"
+source "$BASE_DIR/modules/common.sh"
+source "$BASE_DIR/modules/firewall.sh"
+source "$BASE_DIR/modules/fail2ban.sh"
+source "$BASE_DIR/modules/users.sh"
+source "$BASE_DIR/modules/system.sh"
+source "$BASE_DIR/modules/ssh.sh"
+source "$BASE_DIR/modules/docker.sh"
+source "$BASE_DIR/modules/diagnostics.sh"
+
+eq() {
+  if [[ "$1" != "$2" ]]; then
+    printf 'Expected <%s>; got <%s>\n' "$2" "$1" >&2
+    return 1
+  fi
+}
+
+test_port_bounds() {
+  local x
+  for x in 1 22 1024 65535 00022; do validate_port "$x" || return 1; done
+  for x in 0 65536 -1 foo '22/tcp' 1000000000000000; do
+    if validate_port "$x"; then return 1; fi
+  done
+}
+
+test_ports_csv() {
+  eq "$(ports_csv '80, 443,80,00022')" '80 443 22'
+  eq "$(ports_csv ' 53 , 1053 ')" '53 1053'
+  eq "$(ports_csv '')" ''
+  local x
+  for x in '0' '65536' '22/udp' '80,,443' ',80' '80,' '80 90' '9999999999999'; do
+    if ports_csv "$x" >/dev/null 2>&1; then echo "Accepted invalid: $x" >&2; return 1; fi
+  done
+}
+
+test_ufw_allow() (
+  local logfile
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  ask() { REPLY='80,443,80'; }
+  ufw() { printf '%s\n' "$*" >> "$logfile"; }
+  ufw_allow_ports tcp >/dev/null
+  eq "$(cat "$logfile")" $'allow 80/tcp\nallow 443/tcp\nstatus numbered'
+)
+
+test_ufw_invalid_no_mutation() (
+  local logfile
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  ask() { REPLY='80,,443'; }
+  ufw() { printf '%s\n' "$*" >> "$logfile"; }
+  if ufw_allow_ports tcp >/dev/null 2>&1; then return 1; fi
+  [[ ! -s "$logfile" ]]
+)
+
+test_ufw_remove_protects_ssh() (
+  local logfile
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  ask() { REPLY='2202,443'; }
+  ssh_ports() { echo 2202; }
+  confirm() { return 0; }
+  ufw() { printf '%s\n' "$*" >> "$logfile"; }
+  ufw_remove_ports tcp >/dev/null
+  eq "$(cat "$logfile")" '--force delete allow 443/tcp'
+)
+
+test_ufw_initialization_order() (
+  local logfile
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  packages() { return 0; }
+  ssh_ports() { printf '2202\n'; }
+  ask() {
+    case "$1" in
+      *'Фактический SSH-порт'*) REPLY=2202;;
+      *'tcp через запятую'*) REPLY='80,443';;
+      *'udp через запятую'*) REPLY='51820';;
+      *) echo "Unexpected prompt $1" >&2; return 1;;
+    esac
+  }
+  ufw() { printf '%s\n' "$*" >> "$logfile"; }
+  confirm() { return 0; }
+  ufw_setup >/dev/null
+  eq "$(cat "$logfile")" $'allow 2202/tcp\nallow 2202/tcp\nallow 80/tcp\nallow 443/tcp\nstatus numbered\nallow 51820/udp\nstatus numbered\ndefault deny incoming\ndefault allow outgoing\n--force enable\nstatus verbose'
+)
+
+test_fail2ban_ip_validation() (
+  local logfile
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  ask() { REPLY='198.51.100.22'; }
+  fail2ban-client() { printf '%s\n' "$*" >> "$logfile"; }
+  fail2ban_unban >/dev/null
+  eq "$(cat "$logfile")" 'set sshd unbanip 198.51.100.22'
+  : > "$logfile"
+  ask() { REPLY='1.2.3.4;touch /tmp/unsafe'; }
+  if fail2ban_unban >/dev/null 2>&1; then return 1; fi
+  [[ ! -s "$logfile" ]]
+)
+
+test_bootstrap_interactivity_contract() {
+  grep -Fq 'exec bash /opt/srv-settings/setup.sh </dev/tty' "$BASE_DIR/bootstrap.sh"
+  grep -Fq 'if ! (: </dev/tty)' "$BASE_DIR/bootstrap.sh"
+}
+
+test_ssh_rollback_contract() {
+  grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh"
+  grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh"
+  grep -Fq 'systemctl daemon-reload' "$BASE_DIR/modules/ssh.sh"
+  grep -Fq 'systemctl restart ssh.socket' "$BASE_DIR/modules/ssh.sh"
+}
+
+test_modules_load() {
+  local name
+  for name in system_setup user_create ssh_apply ufw_setup fail2ban_setup docker_mirrors diagnostics; do
+    declare -F "$name" >/dev/null || return 1
+  done
+}
+
+passed=0
+failed=0
+for test_fn in $(compgen -A function test_ | LC_ALL=C sort); do
+  printf 'RUN %-38s' "$test_fn"
+  if ( "$test_fn" ); then
+    printf 'OK\n'
+    ((passed+=1))
+  else
+    printf 'FAILED\n' >&2
+    ((failed+=1))
+  fi
+done
+printf '\nBash: %d passed, %d failed\n' "$passed" "$failed"
+((failed==0))
