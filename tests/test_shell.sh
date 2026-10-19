@@ -18,6 +18,19 @@ eq() {
   fi
 }
 
+test_ubuntu_release_support() {
+  local ver
+  for ver in 22.04 24.04 26.04; do
+    ubuntu_release_supported "$ver" || { printf 'Not supported: %s\n' "$ver" >&2; return 1; }
+  done
+  for ver in '' 20.04 25.10 26.10 testing; do
+    if ubuntu_release_supported "$ver"; then
+      printf 'Unexpectedly supported: %s\n' "$ver" >&2
+      return 1
+    fi
+  done
+}
+
 test_port_bounds() {
   local x
   for x in 1 22 1024 65535 00022; do validate_port "$x" || return 1; done
