@@ -1,16 +1,30 @@
-name: Bash syntax
+name: Bash and function tests
 on:
   push:
-    branches: [main]
   pull_request:
-
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  check:
-    runs-on: ubuntu-24.04
+  test:
+    name: "Unit tests on ${{ matrix.os }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Check Bash syntax
-        shell: bash
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Pass 1 / Bash syntax
         run: |
           set -euo pipefail
-          find . -name '*.sh' -type f -print0 | xargs -0 -r -n1 bash -n
+          find . -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+      - name: Pass 1 / ShellCheck errors
+        run: shellcheck --severity=error bootstrap.sh setup.sh modules/*.sh tests/*.sh
+      - name: Pass 2 / mocked Bash function tests
+        run: bash tests/test_shell.sh
+      - name: Pass 3 / Docker configuration tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
