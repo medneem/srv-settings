@@ -1,0 +1,16 @@
+name: Bash syntax
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Bash syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -name '*.sh' -type f -print0 | xargs -0 -r -n1 bash -n
