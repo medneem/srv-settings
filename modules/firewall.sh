@@ -30,8 +30,43 @@ ufw_setup() {
   local p current
   current="$(ssh_ports)"
   [[ -n $current ]] || { fail 'Не удалось определить SSH-порт'; return 1; }
-  info "Сначала открываем SSH-порты: $current"
-  for p in $current; do ufw allow "$p/tcp" || return 1; done
+  info "Обнаружены SSH-порты: $current"
+  local connected_port
+  ask "Фактический SSH-порт текущего подключения" "${current%%
+  ufw_allow_ports tcp || return 1
+  ufw_allow_ports udp || return 1
+  warn 'Проверьте внешний firewall облачного провайдера и доступ через VNC/консоль!'
+  if confirm 'Применить default deny incoming / allow outgoing и включить UFW?'; then
+    ufw default deny incoming || return 1
+    ufw default allow outgoing || return 1
+    ufw --force enable || return 1
+  fi
+  ufw status verbose
+}
+
+ufw_menu() {
+  local n
+  packages ufw || return 1
+  while true; do
+    printf '\nUFW\n1. Первоначальная настройка\n2. Разрешить TCP-порты\n3. Разрешить UDP-порты\n4. Удалить TCP-правила\n5. Удалить UDP-правила\n6. Список правил\n7. Переключить логирование\n0. Назад\n'
+    read -r -p 'Выбор: ' n || return 0
+    case $n in
+      1) ufw_setup;;
+      2) ufw_allow_ports tcp;;
+      3) ufw_allow_ports udp;;
+      4) ufw_remove_ports tcp;;
+      5) ufw_remove_ports udp;;
+      6) ufw status numbered;;
+      7) if confirm 'Включить UFW logging low?'; then ufw logging low; else ufw logging off; fi;;
+      0) return 0;;
+      *) warn 'Неизвестный пункт';;
+    esac
+  done
+}
+\n'*}" || return 1
+  connected_port="$REPLY"
+  validate_port "$connected_port" || { fail "Недопустимый SSH-порт"; return 1; }
+  for p in $current "$connected_port"; do ufw allow "$p/tcp" || return 1; done
   ufw_allow_ports tcp || return 1
   ufw_allow_ports udp || return 1
   warn 'Проверьте внешний firewall облачного провайдера и доступ через VNC/консоль!'
