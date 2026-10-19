@@ -40,7 +40,7 @@ ports_csv() {
   for item in "${items[@]}"; do
     value="${item//[[:space:]]/}"
     validate_port "$value" || { fail "Некорректный порт: $item"; return 1; }
-    value="$((10#value))"
+    value="$((10#$value))"
     if [[ ! -v seen[$value] ]]; then seen[$value]=1; result+="$value "; fi
   done
   echo "${result% }"
