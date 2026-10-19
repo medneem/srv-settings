@@ -31,8 +31,12 @@ ufw_setup() {
   current="$(ssh_ports)"
   [[ -n $current ]] || { fail 'Не удалось определить SSH-порт'; return 1; }
   info "Обнаружены SSH-порты: $current"
-  local connected_port
-  ask "Фактический SSH-порт текущего подключения" "${current%%
+  local connected_port detected_port
+  detected_port="$(printf '%s\n' "$current" | head -n 1)"
+  ask "Фактический SSH-порт текущего подключения" "$detected_port" || return 1
+  connected_port="$REPLY"
+  validate_port "$connected_port" || { fail "Недопустимый SSH-порт"; return 1; }
+  for p in $current "$connected_port"; do ufw allow "$p/tcp" || return 1; done
   ufw_allow_ports tcp || return 1
   ufw_allow_ports udp || return 1
   warn 'Проверьте внешний firewall облачного провайдера и доступ через VNC/консоль!'
