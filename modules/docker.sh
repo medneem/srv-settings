@@ -11,37 +11,23 @@ docker_mirrors() {
   confirm 'Добавить предложенные зеркала к существующему daemon.json?' || return 0
   mkdir -p /etc/docker
   backup "$cfg" || return 1
-  python3 - "$cfg" <<'PY'
-import json, os, sys, tempfile
-path = sys.argv[1]
-if os.path.exists(path):
-    with open(path, encoding="utf-8") as f:
-        cfg = json.load(f)
-else:
-    cfg = {}
-if not isinstance(cfg, dict):
-    raise SystemExit("Expected JSON object")
-mirrors = [
-    "https://dh-mirror.gitverse.ru",
-    "https://dockerhub.timeweb.cloud",
-    "https://dockerhub1.beget.com",
-    "https://mirror.gcr.io"
-]
-cfg["registry-mirrors"] = list(dict.fromkeys(cfg.get("registry-mirrors", []) + mirrors))
-fd, tmp = tempfile.mkstemp(prefix=".daemon.", dir=os.path.dirname(path))
-try:
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    os.chmod(tmp, 0o644)
-    os.replace(tmp, path)
-finally:
-    if os.path.exists(tmp):
-        os.unlink(tmp)
-PY
-  if command -v dockerd >/dev/null 2>&1; then
-    dockerd --validate --config-file "$cfg" || { fail 'Ошибка проверки daemon.json; восстановите резервную копию'; return 1; }
+  local staged
+  staged="$(mktemp /etc/docker/.daemon.json.XXXXXXXX)" || return 1
+  if ! python3 "$BASE_DIR/lib/docker_mirrors.py" "$cfg" "$staged"; then
+    rm -f -- "$staged"
+    fail 'Ошибка разбора существующего daemon.json (оригинал не изменён)'
+    return 1
   fi
+  if command -v dockerd >/dev/null 2>&1; then
+    if ! dockerd --validate --config-file "$staged"; then
+      rm -f -- "$staged"
+      fail 'dockerd отклонил конфигурацию; оригинал не изменён'
+      return 1
+    fi
+  else
+    warn 'dockerd отсутствует: синтаксис JSON проверен, но проверка конфигурации Docker недоступна.'
+  fi
+  mv -f -- "$staged" "$cfg" || return 1
   if confirm 'Перезапустить Docker СЕЙЧАС? (может прервать контейнеры)'; then
     systemctl restart docker || return 1
   else
