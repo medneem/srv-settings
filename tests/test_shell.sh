@@ -140,6 +140,27 @@ test_ufw_initialization_order() (
   eq "$(cat "$logfile")" $'allow 2202/tcp\nallow 2202/tcp\nallow 80/tcp\nallow 443/tcp\nstatus numbered\nallow 51820/udp\nstatus numbered\ndefault deny incoming\ndefault allow outgoing\n--force enable\nstatus verbose'
 )
 
+test_fail2ban_ignore_requires_running_jail() (
+  command() {
+    if [[ "${1:-}" == -v && "${2:-}" == fail2ban-client ]]; then return 1; fi
+    builtin command "$@"
+  }
+  local touched=""
+  ask() { touched=yes; return 1; }
+  fail2ban-client() { touched=yes; return 1; }
+  if fail2ban_ignore_update add >/dev/null 2>&1; then
+    echo 'Unexpectedly allowed ignoreip update without Fail2ban' >&2
+    return 1
+  fi
+  [[ -z "$touched" ]]
+)
+
+test_fail2ban_ignore_menu_contract() {
+  grep -Fq 'fail2ban_ignore_update add;;' "$BASE_DIR/modules/fail2ban.sh" || return 1
+  grep -Fq 'fail2ban_ignore_update remove;;' "$BASE_DIR/modules/fail2ban.sh" || return 1
+  grep -Fq 'fail2ban_ignore_show;;' "$BASE_DIR/modules/fail2ban.sh" || return 1
+  grep -Fq 'fail2ban_ignore_update add || return 1' "$BASE_DIR/modules/fail2ban.sh"
+}
 test_fail2ban_ip_validation() (
   local logfile
   logfile="$(mktemp)"
