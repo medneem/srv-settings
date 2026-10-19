@@ -4,6 +4,14 @@ info() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*" >&2; }
 fail() { printf '[ERROR] %s\n' "$*" >&2; return 1; }
 
+# Supported LTS releases are checked in setup.sh and in tests.
+ubuntu_release_supported() {
+  case "${1:-}" in
+    22.04|24.04|26.04) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 confirm() {
   local a
   read -r -p "$1 [y/N]: " a || return 1

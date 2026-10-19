@@ -21,11 +21,12 @@ source "$BASE_DIR/modules/fail2ban.sh"
 source "$BASE_DIR/modules/docker.sh"
 source "$BASE_DIR/modules/diagnostics.sh"
 
-case "${VERSION_ID:-}" in
-  22.04|24.04) info "Ubuntu $VERSION_ID";;
-  *) warn "Ubuntu ${VERSION_ID:-unknown}: тестирование и поддержка пока ограничены 22.04/24.04."
-     confirm 'Продолжить на неподтверждённой версии?' || exit 1;;
-esac
+if ubuntu_release_supported "${VERSION_ID:-}"; then
+  info "Поддерживаемая Ubuntu $VERSION_ID LTS"
+else
+  warn "Ubuntu ${VERSION_ID:-unknown}: поддерживаются LTS 22.04, 24.04, 26.04."
+  confirm 'Продолжить на неподтверждённой версии?' || exit 1
+fi
 
 full_setup() {
   info 'Полная настройка Ubuntu'

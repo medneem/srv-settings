@@ -11,13 +11,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Install ShellCheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Check runner version and server packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          source /etc/os-release
+          test "$ID" = ubuntu
+          test "ubuntu-$VERSION_ID" = "${{ matrix.os }}"
+          # Resolver check only: never enable UFW or restart SSH in CI.
+          sudo apt-get -s install openssh-server ufw fail2ban python3-systemd rsyslog ca-certificates curl
       - name: Pass 1 / Bash syntax
         run: |
           set -euo pipefail
