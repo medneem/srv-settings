@@ -32,7 +32,10 @@ EOF
   rm -f "$temp"
   systemctl enable --now fail2ban || return 1
   systemctl restart fail2ban || return 1
-  fail2ban-client status sshd
+  fail2ban-client status sshd || return 1
+  if confirm 'Добавить доверенные IP/CIDR для SSH сейчас?'; then
+    fail2ban_ignore_update add || return 1
+  fi
 }
 
 fail2ban_unban() {
