@@ -2,8 +2,8 @@
 
 docker_mirrors() {
   if ! command -v docker >/dev/null 2>&1; then
-    warn 'Docker не установлен; модуль не устанавливает Docker автоматически.'
-    return 1
+    info 'Docker не установлен: настройка зеркал пропущена. Установка не требуется.'
+    return 0
   fi
   packages python3 || return 1
   local cfg=/etc/docker/daemon.json
@@ -36,6 +36,10 @@ docker_mirrors() {
 }
 
 docker_menu() {
+  if ! command -v docker >/dev/null 2>&1; then
+    info 'Docker не установлен. Дополнительная настройка не требуется.'
+    return 0
+  fi
   local n
   while true; do
     printf '\nDOCKER\n1. Добавить зеркала Docker Hub\n2. Показать daemon.json\n0. Назад\n'
