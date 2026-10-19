@@ -31,7 +31,7 @@ full_setup() {
   info 'Полная настройка Ubuntu'
   warn 'Оставьте открытой текущую SSH-сессию и убедитесь, что есть консоль VPS/VNC.'
   confirm 'Начать первоначальную настройку?' || return 0
-  backup_important || warn 'Не удалось создать полный архив; не изменяйте SSH без резервной копии.'
+  backup_important || { fail 'Нет резервной копии. Настройка остановлена.'; return 1; }
   system_setup || return 1
   if confirm 'Создать пользователя с правами sudo?'; then user_create || return 1; fi
   if confirm 'Настроить SSH-порт и доступ?'; then ssh_apply || return 1; fi
