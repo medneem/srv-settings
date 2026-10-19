@@ -72,10 +72,19 @@ ssh_apply() {
     return 1
   fi
 
-  if ! systemctl daemon-reload ||
-     { (( socket_active == 0 )) || systemctl restart ssh.socket; } &&
-     { (( service_active == 0 )) || systemctl restart ssh.service; }; then
-    : # Проверку доступности и откат выполняем ниже.
+  local apply_ok=1
+  systemctl daemon-reload || apply_ok=0
+  if (( apply_ok && socket_active )); then
+    systemctl restart ssh.socket || apply_ok=0
+  fi
+  if (( apply_ok && service_active )); then
+    systemctl restart ssh.service || apply_ok=0
+  fi
+  if (( ! apply_ok )); then
+    warn 'Не удалось перезапустить SSH. Выполняем откат!'
+    bash "$rollback" || warn "Ручное восстановление: bash $rollback"
+    systemctl stop "$unit.timer" || true
+    return 1
   fi
   if ! ss -H -ltn | awk -v port=":$newport" '$4 ~ port "$" {found=1} END {exit !found}'; then
     warn 'Новый порт не слушается. Выполняем откат!'
