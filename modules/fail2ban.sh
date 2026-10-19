@@ -76,7 +76,7 @@ fail2ban_ignore_update() {
   cfg="$(fail2ban_ignore_path)"
   ask 'IP-адреса / CIDR-сети через запятую (IPv4, IPv6)' '' || return 1
   raw="$REPLY"
-  staged="$(mktemp /etc/fail2ban/jail.d/.srv-settings-ignore.XXXXXXXX)" || return 1
+  staged="$(mktemp "$(dirname "$cfg")/.srv-settings-ignore.XXXXXXXX")" || return 1
   if ! python3 "$BASE_DIR/lib/fail2ban_ignore.py" "$action" "$cfg" "$raw" >"$staged"; then
     rm -f -- "$staged"
     return 1
@@ -95,7 +95,7 @@ fail2ban_ignore_update() {
 
   if [[ -f "$cfg" ]]; then
     had_original=1
-    old_copy="$(mktemp /etc/fail2ban/jail.d/.srv-settings-previous.XXXXXXXX)" || { rm -f -- "$staged"; return 1; }
+    old_copy="$(mktemp "$(dirname "$cfg")/.srv-settings-previous.XXXXXXXX")" || { rm -f -- "$staged"; return 1; }
     if ! cp -a -- "$cfg" "$old_copy"; then
       rm -f -- "$old_copy" "$staged"
       return 1
