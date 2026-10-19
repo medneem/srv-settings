@@ -10,6 +10,7 @@ source "$BASE_DIR/modules/system.sh"
 source "$BASE_DIR/modules/ssh.sh"
 source "$BASE_DIR/modules/docker.sh"
 source "$BASE_DIR/modules/diagnostics.sh"
+source "$BASE_DIR/modules/full_setup.sh"
 
 eq() {
   if [[ "$1" != "$2" ]]; then
@@ -18,6 +19,44 @@ eq() {
   fi
 }
 
+# Core setup should succeed without any Docker commands or dependencies.
+test_full_setup_without_docker() (
+  local logfile expected
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  info() { :; }
+  warn() { :; }
+  confirm() { return 0; }
+  backup_important() { echo backup >> "$logfile"; }
+  system_setup() { echo system >> "$logfile"; }
+  user_create() { echo user >> "$logfile"; }
+  ssh_apply() { echo ssh >> "$logfile"; }
+  ufw_setup() { echo ufw >> "$logfile"; }
+  fail2ban_setup() { echo fail2ban >> "$logfile"; }
+  docker_menu() { echo UNEXPECTED_DOCKER_MENU >> "$logfile"; return 1; }
+  docker_mirrors() { echo UNEXPECTED_DOCKER_MIRRORS >> "$logfile"; return 1; }
+  full_setup || return 1
+  expected="$(printf '%s\n' backup system user ssh ufw fail2ban)"
+  eq "$(cat "$logfile")" "$expected"
+)
+
+# Optional Docker menu must be a no-op on systems without Docker.
+test_missing_docker_is_not_an_error() (
+  local logfile
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  command() {
+    if [[ "${1:-}" == -v && "${2:-}" == docker ]]; then return 1; fi
+    builtin command "$@"
+  }
+  info() { echo "$*" >> "$logfile"; }
+  packages() { echo UNEXPECTED_PACKAGES >> "$logfile"; return 1; }
+  backup() { echo UNEXPECTED_BACKUP >> "$logfile"; return 1; }
+  docker_menu || return 1
+  docker_mirrors || return 1
+  if grep -Eq "UNEXPECTED_" "$logfile"; then cat "$logfile" >&2; return 1; fi
+  grep -Fq "Docker не установлен" "$logfile"
+)
 test_ubuntu_release_support() {
   local ver
   for ver in 22.04 24.04 26.04; do

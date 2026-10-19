@@ -20,6 +20,7 @@ source "$BASE_DIR/modules/firewall.sh"
 source "$BASE_DIR/modules/fail2ban.sh"
 source "$BASE_DIR/modules/docker.sh"
 source "$BASE_DIR/modules/diagnostics.sh"
+source "$BASE_DIR/modules/full_setup.sh"
 
 if ubuntu_release_supported "${VERSION_ID:-}"; then
   info "Поддерживаемая Ubuntu $VERSION_ID LTS"
@@ -27,19 +28,6 @@ else
   warn "Ubuntu ${VERSION_ID:-unknown}: поддерживаются LTS 22.04, 24.04, 26.04."
   confirm 'Продолжить на неподтверждённой версии?' || exit 1
 fi
-
-full_setup() {
-  info 'Полная настройка Ubuntu'
-  warn 'Оставьте открытой текущую SSH-сессию и убедитесь, что есть консоль VPS/VNC.'
-  confirm 'Начать первоначальную настройку?' || return 0
-  backup_important || { fail 'Нет резервной копии. Настройка остановлена.'; return 1; }
-  system_setup || return 1
-  if confirm 'Создать пользователя с правами sudo?'; then user_create || return 1; fi
-  if confirm 'Настроить SSH-порт и доступ?'; then ssh_apply || return 1; fi
-  if confirm 'Настроить UFW и разрешённые TCP/UDP-порты?'; then ufw_setup || return 1; fi
-  if confirm 'Настроить Fail2ban?'; then fail2ban_setup || return 1; fi
-  info 'Первоначальная настройка завершена. Проверьте диагностику, SSH и firewall облачного провайдера.'
-}
 
 main_menu() {
   local choice
@@ -50,7 +38,7 @@ main_menu() {
     printf '3. Настройка SSH\n'
     printf '4. Управление пользователями и sudo\n'
     printf '5. Настройка Fail2ban\n'
-    printf '6. Настройка Docker\n'
+    printf '6. Docker (необязательно)\n'
     printf '7. Обновление системы / время\n'
     printf '8. Диагностика\n'
     printf '9. Резервное копирование конфигурации\n'
