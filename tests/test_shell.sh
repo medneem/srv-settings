@@ -27,9 +27,9 @@ test_port_bounds() {
 }
 
 test_ports_csv() {
-  eq "$(ports_csv '80, 443,80,00022')" '80 443 22'
-  eq "$(ports_csv ' 53 , 1053 ')" '53 1053'
-  eq "$(ports_csv '')" ''
+  eq "$(ports_csv '80, 443,80,00022')" '80 443 22' || return 1
+  eq "$(ports_csv ' 53 , 1053 ')" '53 1053' || return 1
+  eq "$(ports_csv '')" '' || return 1
   local x
   for x in '0' '65536' '22/udp' '80,,443' ',80' '80,' '80 90' '9999999999999'; do
     if ports_csv "$x" >/dev/null 2>&1; then echo "Accepted invalid: $x" >&2; return 1; fi
@@ -95,7 +95,7 @@ test_fail2ban_ip_validation() (
   ask() { REPLY='198.51.100.22'; }
   fail2ban-client() { printf '%s\n' "$*" >> "$logfile"; }
   fail2ban_unban >/dev/null
-  eq "$(cat "$logfile")" 'set sshd unbanip 198.51.100.22'
+  eq "$(cat "$logfile")" 'set sshd unbanip 198.51.100.22' || return 1
   : > "$logfile"
   ask() { REPLY='1.2.3.4;touch /tmp/unsafe'; }
   if fail2ban_unban >/dev/null 2>&1; then return 1; fi
@@ -103,15 +103,15 @@ test_fail2ban_ip_validation() (
 )
 
 test_bootstrap_interactivity_contract() {
-  grep -Fq 'exec bash /opt/srv-settings/setup.sh </dev/tty' "$BASE_DIR/bootstrap.sh"
-  grep -Fq 'if ! (: </dev/tty)' "$BASE_DIR/bootstrap.sh"
+  grep -Fq 'exec bash /opt/srv-settings/setup.sh </dev/tty' "$BASE_DIR/bootstrap.sh" || return 1
+  grep -Fq 'if ! (: </dev/tty)' "$BASE_DIR/bootstrap.sh" || return 1
 }
 
 test_ssh_rollback_contract() {
-  grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh"
-  grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh"
-  grep -Fq 'systemctl daemon-reload' "$BASE_DIR/modules/ssh.sh"
-  grep -Fq 'systemctl restart ssh.socket' "$BASE_DIR/modules/ssh.sh"
+  grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
+  grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh" || return 1
+  grep -Fq 'systemctl daemon-reload' "$BASE_DIR/modules/ssh.sh" || return 1
+  grep -Fq 'systemctl restart ssh.socket' "$BASE_DIR/modules/ssh.sh" || return 1
 }
 
 test_modules_load() {
