@@ -9,13 +9,13 @@
 Запуск **одной командой** на сервере Ubuntu:
 
 ```bash
-curl -fsSLo /tmp/srv-settings-bootstrap.sh https://raw.githubusercontent.com/medneem/srv-settings/main/bootstrap.sh && sudo bash /tmp/srv-settings-bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/medneem/srv-settings/main/bootstrap.sh | sudo bash
 ```
 
 Стартовый `bootstrap.sh`:
-1. Проверять Ubuntu, права root и необходимые зависимости.
-2. Скачивать/обновлять файлы проекта из этого репозитория.
-3. Запускать интерактивное меню `setup.sh`.
+1. Проверяет Ubuntu, права root и наличие терминала.
+2. Скачивает файлы проекта из этого репозитория.
+3. Запускает интерактивное меню `setup.sh` с вводом через `/dev/tty`.
 
 Расположение файлов после установки — `/opt/srv-settings/`. Для повторного запуска меню:
 
@@ -23,7 +23,9 @@ curl -fsSLo /tmp/srv-settings-bootstrap.sh https://raw.githubusercontent.com/med
 sudo bash /opt/srv-settings/setup.sh
 ```
 
-**Почему не `curl | bash`?** Скрипт интерактивный: он спрашивает имя пользователя, пароль, порты и подтверждения. При запуске через pipe стандартный ввод Bash занят самим скриптом. Скачивание в файл и отдельный запуск сохраняют нормальный ввод с терминала. Кроме того, перед выполнением можно посмотреть содержимое скачанного файла.
+**Как работает интерактивный ввод через pipe?** Стартовый Bash-скрипт скачивается через stdin, затем `bootstrap.sh` запускает меню с вводом из `/dev/tty`. Поэтому можно вводить логин, пароль и порты непосредственно в SSH-терминале. При отсутствии интерактивного терминала запуск завершится ошибкой.
+
+**Безопаснее перед запуском просмотреть код.** Вариант ниже загружает скрипт в файл и позволяет его изучить. При использовании pipe без `set -o pipefail` ошибка `curl` не всегда становится кодом выхода всей команды.
 
 Для предварительного просмотра:
 
@@ -61,7 +63,7 @@ sudo bash /tmp/srv-settings-bootstrap.sh
 - список открытых TCP-портов через запятую, например `80,443,1443`;
 - список открытых UDP-портов через запятую, например `26,27,1053`;
 - часовой пояс, синхронизацию времени и прочие параметры;
-- настройки Fail2ban, включая `maxretry`, `findtime` и `bantime`.
+- настройку Fail2ban (`maxretry=3`, `findtime=30m`, `bantime=24h` в текущей версии).
 
 ## Возможности
 
@@ -93,6 +95,7 @@ srv-settings/
 ├── bootstrap.sh             # Загрузка/обновление и первый запуск
 ├── setup.sh                 # Интерактивное меню
 ├── modules/
+│   ├── common.sh
 │   ├── system.sh
 │   ├── users.sh
 │   ├── ssh.sh
@@ -100,6 +103,12 @@ srv-settings/
 │   ├── fail2ban.sh
 │   ├── docker.sh
 │   └── diagnostics.sh
+├── lib/
+│   └── docker_mirrors.py
+├── tests/
+│   ├── test_shell.sh
+│   └── test_docker_mirrors.py
+├── .github/workflows/bash-syntax.yml
 └── README.md
 ```
 
@@ -107,7 +116,7 @@ srv-settings/
 
 Репозиторий: https://github.com/medneem/srv-settings
 
-Первая версия включает SSH, UFW, Fail2ban, пользователей, Docker и диагностику. Для проверки синтаксиса добавлен GitHub Actions (`bash -n`). Системные настройки необходимо проверить на тестовом VPS перед использованием на рабочих серверах.
+Первая версия включает SSH, UFW, Fail2ban, пользователей, Docker и диагностику. GitHub Actions на Ubuntu 22.04/24.04 запускает три этапа: Bash-синтаксис и ShellCheck, тесты Bash-функций с подменой системных команд, Python-тесты Docker JSON. Тесты не изменяют системные настройки. Системные настройки необходимо проверить на тестовом VPS перед использованием на рабочих серверах.
 
 ## Что важно знать перед запуском
 
@@ -115,4 +124,4 @@ srv-settings/
 - В Ubuntu 24.04 учитывается `ssh.socket` и `systemctl daemon-reload`.
 - Пароль пользователя вводится через `passwd`, а не аргументом командной строки.
 - Docker должен быть установлен заранее; модуль лишь меняет registry mirrors в `daemon.json`.
-- Bash-синтаксис проверяет GitHub Actions. Это не заменяет интеграционные тесты на VPS.
+- Bash-синтаксис, ShellCheck, тесты функций UFW/портов и Docker JSON запускаются в GitHub Actions для Ubuntu 22.04/24.04. Это не заменяет интеграционные тесты SSH/UFW на VPS.
