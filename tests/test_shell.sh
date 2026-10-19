@@ -140,6 +140,66 @@ test_ufw_initialization_order() (
   eq "$(cat "$logfile")" $'allow 2202/tcp\nallow 2202/tcp\nallow 80/tcp\nallow 443/tcp\nstatus numbered\nallow 51820/udp\nstatus numbered\ndefault deny incoming\ndefault allow outgoing\n--force enable\nstatus verbose'
 )
 
+test_fail2ban_ignore_add_remove_and_rollback() (
+  local temp fail_validation
+  temp="$(mktemp -d)"
+  trap 'rm -rf -- "$temp"' EXIT
+  fail_validation=0
+  fail2ban_ignore_path() { echo "$temp/95-srv-settings-ignore.local"; }
+  command() {
+    if [[ "${1:-}" == -v && "${2:-}" == fail2ban-client ]]; then return 0; fi
+    builtin command "$@"
+  }
+  fail2ban-client() {
+    case "$*" in
+      "status sshd"|"reload sshd") return 0;;
+      "-t") (( fail_validation == 0 )); return;;
+      "get sshd ignoreip") echo "127.0.0.0/8 ::1"; return 0;;
+      *) echo "Unexpected Fail2ban call: $*" >&2; return 1;;
+    esac
+  }
+  ask() { REPLY="192.0.2.7,10.1.2.5/24,2001:db8::5"; }
+  confirm() { return 0; }
+  backup() { return 0; }
+  fail2ban_ignore_update add >/dev/null || return 1
+  local target
+  target="$(fail2ban_ignore_path)"
+  grep -Fq "ignoreip = 127.0.0.0/8 ::1 192.0.2.7 10.1.2.0/24 2001:db8::5" "$target" || return 1
+  local previous
+  previous="$(cat "$target")"
+  fail_validation=1
+  ask() { REPLY="198.51.100.33"; }
+  if fail2ban_ignore_update add >/dev/null 2>&1; then
+    echo "Fail2ban config test failure was not propagated" >&2
+    return 1
+  fi
+  eq "$(cat "$target")" "$previous" || return 1
+  fail_validation=0
+  ask() { REPLY="192.0.2.7,10.1.2.0/24,2001:db8::5"; }
+  fail2ban_ignore_update remove >/dev/null || return 1
+  [[ ! -e "$target" ]]
+)
+test_fail2ban_ignore_requires_running_jail() (
+  command() {
+    if [[ "${1:-}" == -v && "${2:-}" == fail2ban-client ]]; then return 1; fi
+    builtin command "$@"
+  }
+  local touched=""
+  ask() { touched=yes; return 1; }
+  fail2ban-client() { touched=yes; return 1; }
+  if fail2ban_ignore_update add >/dev/null 2>&1; then
+    echo 'Unexpectedly allowed ignoreip update without Fail2ban' >&2
+    return 1
+  fi
+  [[ -z "$touched" ]]
+)
+
+test_fail2ban_ignore_menu_contract() {
+  grep -Fq 'fail2ban_ignore_update add;;' "$BASE_DIR/modules/fail2ban.sh" || return 1
+  grep -Fq 'fail2ban_ignore_update remove;;' "$BASE_DIR/modules/fail2ban.sh" || return 1
+  grep -Fq 'fail2ban_ignore_show;;' "$BASE_DIR/modules/fail2ban.sh" || return 1
+  grep -Fq 'fail2ban_ignore_update add || return 1' "$BASE_DIR/modules/fail2ban.sh"
+}
 test_fail2ban_ip_validation() (
   local logfile
   logfile="$(mktemp)"
