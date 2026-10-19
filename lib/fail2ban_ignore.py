@@ -13,7 +13,7 @@ import re
 import sys
 
 HEADER = "# Managed by srv-settings; use Fail2ban menu to edit.\n"
-BASELINE = ("127.0.0.1/8", "::1")
+BASELINE = ("127.0.0.0/8", "::1")
 SECTION = "sshd"
 
 
