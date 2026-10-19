@@ -17,7 +17,7 @@ ask() {
 }
 
 validate_port() {
-  [[ $1 =~ ^[0-9]+$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 ))
+  [[ $1 =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 ))
 }
 
 ask_port() {
@@ -33,6 +33,9 @@ ports_csv() {
   local -a items=()
   local -A seen=()
   [[ -z "${raw//[[:space:],]/}" ]] && { echo ''; return 0; }
+  if [[ ! $raw =~ ^[[:space:]]*[0-9]+[[:space:]]*(,[[:space:]]*[0-9]+[[:space:]]*)*$ ]]; then
+    fail "Некорректный список портов: $raw"; return 1
+  fi
   IFS=',' read -r -a items <<< "$raw"
   for item in "${items[@]}"; do
     value="${item//[[:space:]]/}"
