@@ -107,7 +107,8 @@ srv-settings/
 │   └── docker_mirrors.py
 ├── tests/
 │   ├── test_shell.sh
-│   └── test_docker_mirrors.py
+│   ├── test_docker_mirrors.py
+│   └── test_bootstrap_pipe.sh
 ├── .github/workflows/bash-syntax.yml
 └── README.md
 ```
@@ -116,7 +117,7 @@ srv-settings/
 
 Репозиторий: https://github.com/medneem/srv-settings
 
-Первая версия включает SSH, UFW, Fail2ban, пользователей, Docker и диагностику. GitHub Actions на Ubuntu 22.04/24.04 запускает три этапа: Bash-синтаксис и ShellCheck, тесты Bash-функций с подменой системных команд, Python-тесты Docker JSON. Тесты не изменяют системные настройки. Системные настройки необходимо проверить на тестовом VPS перед использованием на рабочих серверах.
+Первая версия включает SSH, UFW, Fail2ban, пользователей, Docker и диагностику. GitHub Actions на Ubuntu 22.04/24.04 запускает три этапа: Bash-синтаксис и ShellCheck, тесты Bash-функций с подменой системных команд, Python-тесты Docker JSON и проверку запуска `curl | sudo bash` в псевдотерминале. Тесты не меняют настройки SSH/UFW систем CI. Системные настройки необходимо проверить на тестовом VPS перед использованием на рабочих серверах.
 
 ## Что важно знать перед запуском
 
@@ -124,4 +125,4 @@ srv-settings/
 - В Ubuntu 24.04 учитывается `ssh.socket` и `systemctl daemon-reload`.
 - Пароль пользователя вводится через `passwd`, а не аргументом командной строки.
 - Docker должен быть установлен заранее; модуль лишь меняет registry mirrors в `daemon.json`.
-- Bash-синтаксис, ShellCheck, тесты функций UFW/портов и Docker JSON запускаются в GitHub Actions для Ubuntu 22.04/24.04. Это не заменяет интеграционные тесты SSH/UFW на VPS.
+- Bash-синтаксис, ShellCheck, тесты функций UFW/портов, Docker JSON и интерактивного запуска bootstrap через pipe запускаются в GitHub Actions для Ubuntu 22.04/24.04. Это не заменяет интеграционные тесты SSH/UFW на VPS.
