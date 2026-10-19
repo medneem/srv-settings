@@ -42,7 +42,7 @@ class IgnoreIpTests(unittest.TestCase):
     def test_render_preserves_localhost_and_only_ssh_jail(self):
         text = mod.render(["192.0.2.1", "2001:db8::/32"])
         self.assertTrue(text.startswith(mod.HEADER))
-        self.assertIn("[sshd]\nignoreip = 127.0.0.1/8 ::1 192.0.2.1 2001:db8::/32", text)
+        self.assertIn("[sshd]\nignoreip = 127.0.0.0/8 ::1 192.0.2.1 2001:db8::/32", text)
         self.assertNotIn("[DEFAULT]", text)
 
     def test_remove_last_user_ip_removes_override(self):
