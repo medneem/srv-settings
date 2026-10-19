@@ -26,14 +26,19 @@ sudo_nopasswd() {
   warn 'NOPASSWD: ALL разрешает выполнение любых команд от root без пароля'
   confirm "Разрешить NOPASSWD только для $name?" || return 0
   path="/etc/sudoers.d/90-srv-settings-$name"
-  backup "$path" || return 1
-  printf '%s ALL=(ALL:ALL) NOPASSWD: ALL\n' "$name" > "$path"
-  chmod 0440 "$path"
-  if ! visudo -cf "$path"; then
-    rm -f "$path"
-    fail 'Ошибка sudoers; новое правило удалено'
+  local staging
+  staging="$(mktemp /etc/sudoers.d/.srv-settings-sudo-XXXXXXXX)" || return 1
+  if ! printf '%s ALL=(ALL:ALL) NOPASSWD: ALL\n' "$name" > "$staging"; then
+    rm -f -- "$staging"; return 1
+  fi
+  chmod 0440 "$staging"
+  if ! visudo -cf "$staging"; then
+    rm -f -- "$staging"
+    fail 'Ошибка sudoers; существующее правило не изменено'
     return 1
   fi
+  backup "$path" || { rm -f -- "$staging"; return 1; }
+  mv -f -- "$staging" "$path" || { rm -f -- "$staging"; return 1; }
   info 'Проверка sudoers пройдена'
 }
 
