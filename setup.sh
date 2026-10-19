@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Interactive Ubuntu server configuration. Run with sudo.
 set -uo pipefail
+umask 077  # Резервные копии могут содержать приватные SSH-ключи.
 
 BASE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 if (( EUID != 0 )); then
