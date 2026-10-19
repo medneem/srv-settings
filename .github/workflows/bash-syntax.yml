@@ -28,3 +28,5 @@ jobs:
         run: bash tests/test_shell.sh
       - name: Pass 3 / Docker configuration tests
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Pass 3 / interactive bootstrap pipeline smoke test
+        run: bash tests/test_bootstrap_pipe.sh
