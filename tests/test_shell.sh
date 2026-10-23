@@ -602,6 +602,19 @@ test_ssh_effective_settings_never_greps_live_pipe() {
   grep -Fq 'ssh_validate_effective_config "$effective"' "$ssh"
 }
 
+test_all_interactive_prompts_use_unicode_editor() {
+  local file
+  for file in "$BASE_DIR/setup.sh" "$BASE_DIR"/modules/*.sh; do
+    if [[ "$file" != "$BASE_DIR/modules/common.sh" ]] &&
+       grep -Eq '^[[:space:]]*read[[:space:]]+-r[[:space:]]+-p[[:space:]]' "$file"; then
+      printf 'Old byte-wise terminal read in %s\n' "$file" >&2
+      return 1
+    fi
+  done
+  grep -Fq 'read -e -r -p' "$BASE_DIR/modules/common.sh" || return 1
+  grep -Fq 'prepare_utf8_terminal' "$BASE_DIR/setup.sh"
+}
+
 test_ssh_rollback_contract() {
   grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
   grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh" || return 1
