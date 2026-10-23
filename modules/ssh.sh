@@ -273,6 +273,19 @@ ssh_apply() {
 # /etc/ssh/sshd_config is the source of truth for requested global AllowUsers.
 ssh_allowusers_config_path() { printf '%s\n' /etc/ssh/sshd_config; }
 
+ssh_allowusers_cancel_rollback() {
+  local unit="$1"
+  if ! systemctl stop "$unit.timer"; then
+    warn "Не удалось остановить таймер отката $unit.timer."
+    return 1
+  fi
+  if systemctl is-active --quiet "$unit.timer"; then
+    warn "Таймер отката $unit.timer всё ещё активен."
+    return 1
+  fi
+  return 0
+}
+
 ssh_allowusers_apply() {
   local username="$1" cfg staged saved unit rollback status_effective
   local service_active=0 socket_active=0
@@ -344,7 +357,7 @@ ssh_allowusers_apply() {
   } > "$rollback"
   chmod 0700 "$rollback" || { rm -f -- "$staged"; return 1; }
 
-  unit="srv-settings-allowusers-$"
+  unit="srv-settings-allowusers-$$"
   if ! systemd-run --quiet --unit="$unit" --on-active=5min /bin/bash "$rollback"; then
     rm -f -- "$staged"
     fail 'Не удалось назначить автоматический откат: AllowUsers не изменён.'
@@ -363,10 +376,10 @@ ssh_allowusers_apply() {
   warn 'Откройте НОВОЕ SSH-подключение во втором терминале и проверьте sudo id -u (ожидается 0).'
   warn 'Если вход не работает, НЕ закрывайте текущую сессию. Автооткат через 5 минут.'
   if confirm "Подтверждаете НОВЫЙ успешный SSH-вход $username с sudo (вывод 0)? (y отменяет откат)"; then
-    if systemctl stop "$unit.timer"; then
+    if ssh_allowusers_cancel_rollback "$unit"; then
       info 'AllowUsers подтверждён; автоматический откат отменён.'
     else
-      warn "Не удалось отменить таймер $unit.timer: проверьте его вручную."
+      warn "Таймер отката не удалось надёжно отменить. Проверьте: systemctl list-timers --all"
       return 1
     fi
   else
