@@ -72,6 +72,7 @@ test_docker_supported_ubuntu_codenames() (
 
 test_docker_install_declined_no_mutation() (
   local logfile
+  VERSION_ID=22.04
   logfile="$(mktemp)"
   trap 'rm -f "$logfile"' EXIT
   confirm() { return 1; }
@@ -123,6 +124,36 @@ test_docker_install_uses_official_repo_and_compose() (
   grep -Fq 'apt-get update' "$logfile" || return 1
   grep -Fq 'apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin' "$logfile" || return 1
   grep -Fq 'systemctl enable --now docker' "$logfile" || return 1
+)
+
+test_docker_invalid_gpg_key_does_not_write_sources() (
+  local temp logfile
+  temp="$(mktemp -d)"
+  trap 'rm -rf "$temp"' EXIT
+  logfile="$temp/apt.log"
+  VERSION_ID=26.04
+  docker_repo_key_path() { printf '%s\n' "$temp/keyrings/docker.asc"; }
+  docker_repo_sources_path() { printf '%s\n' "$temp/sources/docker.sources"; }
+  confirm() { return 0; }
+  packages() { return 0; }
+  dpkg-query() { return 1; }
+  dpkg() { echo amd64; }
+  curl() {
+    local last='' arg
+    for arg in "$@"; do
+      if [[ "$last" == -o ]]; then
+        printf '%s\n' 'not a PGP public key' > "$arg"
+        return 0
+      fi
+      last="$arg"
+    done
+    return 1
+  }
+  apt-get() { printf '%s\n' "$*" >> "$logfile"; return 1; }
+  if docker_install >/dev/null 2>&1; then return 1; fi
+  [[ ! -e "$temp/keyrings/docker.asc" &&
+     ! -e "$temp/sources/docker.sources" &&
+     ! -e "$logfile" ]]
 )
 
 test_docker_conflicting_packages_require_separate_approval() (
