@@ -1,17 +1,54 @@
 #!/usr/bin/env bash
 
+# Keep file paths mockable: CI must never write to the host's /etc.
+fail2ban_setup_path() {
+  printf '%s\n' /etc/fail2ban/jail.d/90-srv-settings.local
+}
+
+# fail2ban-client -t only checks syntax; the daemon may still be starting.
+# Treat Fail2ban as ready only when its SSH jail answers over the socket.
+fail2ban_wait_ready() {
+  local max_attempts="${1:-12}" attempt
+  for ((attempt=1; attempt<=max_attempts; attempt++)); do
+    if fail2ban-client status sshd >/dev/null 2>&1; then
+      return 0
+    fi
+    if (( attempt < max_attempts )); then
+      sleep 1
+    fi
+  done
+  return 1
+}
+
+fail2ban_show_startup_diagnostics() {
+  warn 'Fail2ban не готов или SSH jail не запустился. Диагностика:'
+  systemctl status fail2ban --no-pager -l >&2 || true
+  journalctl -u fail2ban -n 40 --no-pager >&2 || true
+}
+
+fail2ban_restore_setup_config() {
+  local cfg="$1" original="$2" existed="$3"
+  if (( existed )); then
+    cp -a -- "$original" "$cfg"
+  else
+    rm -f -- "$cfg"
+  fi
+}
+
 fail2ban_setup() {
   packages fail2ban python3-systemd ufw || return 1
-  local cfg=/etc/fail2ban/jail.d/90-srv-settings.local
-  local port_list
+  local cfg port_list temp existed=0
+  cfg="$(fail2ban_setup_path)" || return 1
   port_list="$(ssh_ports | paste -sd, -)"
   [[ -n $port_list ]] || { fail 'Не удалось определить SSH-порт'; return 1; }
   backup "$cfg" || return 1
-  # Keep a rollback copy in case fail2ban-client -t fails.
-  local temp
+
   temp="$(mktemp)" || return 1
-  if [[ -f $cfg ]]; then cp -a "$cfg" "$temp"; else : >"$temp"; fi
-  cat >"$cfg" <<EOF
+  if [[ -f "$cfg" ]]; then
+    existed=1
+    cp -a -- "$cfg" "$temp" || { rm -f -- "$temp"; return 1; }
+  fi
+  if ! cat >"$cfg" <<EOF
 [DEFAULT]
 maxretry = 3
 findtime = 30m
@@ -23,15 +60,38 @@ enabled = true
 backend = systemd
 port = $port_list
 EOF
+  then
+    fail2ban_restore_setup_config "$cfg" "$temp" "$existed" ||
+      warn "Не удалось восстановить конфигурацию: $cfg"
+    rm -f -- "$temp"
+    return 1
+  fi
   if ! fail2ban-client -t; then
-    if [[ -s $temp ]]; then cp -a "$temp" "$cfg"; else rm -f "$cfg"; fi
-    rm -f "$temp"
+    fail2ban_restore_setup_config "$cfg" "$temp" "$existed" ||
+      warn "Не удалось восстановить конфигурацию: $cfg"
+    rm -f -- "$temp"
     fail 'Ошибка конфигурации Fail2ban; изменения отменены'
     return 1
   fi
-  rm -f "$temp"
-  systemctl enable --now fail2ban || return 1
-  systemctl restart fail2ban || return 1
+
+  # Enable once; restart once to apply the freshly written jail config.
+  # Immediately running fail2ban-client here can race with daemon startup.
+  if ! systemctl enable fail2ban ||
+     ! systemctl restart fail2ban ||
+     ! fail2ban_wait_ready 12; then
+    fail2ban_show_startup_diagnostics
+    if fail2ban_restore_setup_config "$cfg" "$temp" "$existed"; then
+      warn 'Предыдущая конфигурация Fail2ban восстановлена.'
+      systemctl restart fail2ban >/dev/null 2>&1 ||
+        warn 'Не удалось перезапустить Fail2ban с прежней конфигурацией.'
+    else
+      warn "Не удалось восстановить $cfg; требуется ручная проверка."
+    fi
+    rm -f -- "$temp"
+    fail 'Fail2ban SSH jail недоступен после запуска; настройка не завершена.'
+    return 1
+  fi
+  rm -f -- "$temp"
   fail2ban-client status sshd || return 1
   if confirm 'Добавить доверенные IP/CIDR для SSH сейчас?'; then
     fail2ban_ignore_update add || return 1

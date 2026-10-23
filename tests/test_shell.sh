@@ -426,6 +426,129 @@ test_ufw_initialization_order() (
   eq "$(cat "$logfile")" $'allow 2202/tcp\nallow 2202/tcp\nallow 80/tcp\nallow 443/tcp\nstatus numbered\nallow 51820/udp\nstatus numbered\ndefault deny incoming\ndefault allow outgoing\n--force enable\nstatus verbose'
 )
 
+
+test_fail2ban_wait_ready_retries_until_ssh_jail_responds() (
+  local checks=0 pauses=0
+  fail2ban-client() {
+    [[ "$*" == 'status sshd' ]] || return 1
+    checks=$((checks + 1))
+    (( checks == 3 ))
+  }
+  sleep() { [[ "$1" == 1 ]] || return 1; pauses=$((pauses + 1)); }
+  fail2ban_wait_ready 5 || return 1
+  [[ "$checks" == 3 && "$pauses" == 2 ]]
+)
+
+test_fail2ban_wait_ready_times_out_without_false_success() (
+  local checks=0 pauses=0
+  fail2ban-client() {
+    [[ "$*" == 'status sshd' ]] || return 1
+    checks=$((checks + 1))
+    return 1
+  }
+  sleep() { [[ "$1" == 1 ]] || return 1; pauses=$((pauses + 1)); }
+  if fail2ban_wait_ready 4; then
+    echo 'Fail2ban reported readiness with no running sshd jail' >&2
+    return 1
+  fi
+  [[ "$checks" == 4 && "$pauses" == 3 ]]
+)
+
+test_fail2ban_setup_waits_for_ready_jail_without_double_start() (
+  local dir fixture_cfg calls=0 pauses=0
+  dir="$(mktemp -d)"
+  trap 'rm -rf -- "$dir"' EXIT
+  fixture_cfg="$dir/90-srv-settings.local"
+  fail2ban_setup_path() { printf '%s\n' "$fixture_cfg"; }
+  packages() { return 0; }
+  backup() { return 0; }
+  ssh_ports() { printf '2203\n'; }
+  confirm() { return 1; }
+  systemctl() {
+    case "$*" in
+      'enable fail2ban'|'restart fail2ban') printf '%s\n' "$*" >> "$dir/systemctl.log";;
+      *) echo "Unexpected systemctl: $*" >&2; return 1;;
+    esac
+  }
+  fail2ban-client() {
+    case "$*" in
+      '-t') return 0;;
+      'status sshd')
+        calls=$((calls + 1))
+        (( calls >= 3 )) && printf 'Status for jail: sshd\n'
+        (( calls >= 3 ))
+        ;;
+      *) echo "Unexpected fail2ban-client: $*" >&2; return 1;;
+    esac
+  }
+  sleep() { pauses=$((pauses + 1)); }
+  fail2ban_setup || return 1
+  [[ "$calls" == 4 && "$pauses" == 2 ]] || return 1
+  [[ "$(cat "$dir/systemctl.log")" == "$(printf 'enable fail2ban\nrestart fail2ban')" ]] || return 1
+  grep -Fxq 'port = 2203' "$fixture_cfg"
+)
+
+test_fail2ban_setup_failed_service_restores_previous_jail() (
+  local dir fixture_cfg status_checks=0
+  dir="$(mktemp -d)"
+  trap 'rm -rf -- "$dir"' EXIT
+  fixture_cfg="$dir/90-srv-settings.local"
+  printf '%s\n' '# previous working configuration' > "$fixture_cfg"
+  fail2ban_setup_path() { printf '%s\n' "$fixture_cfg"; }
+  packages() { return 0; }
+  backup() { return 0; }
+  ssh_ports() { printf '22\n'; }
+  fail2ban-client() {
+    case "$*" in
+      '-t') return 0;;
+      'status sshd') status_checks=$((status_checks + 1)); return 1;;
+      *) return 1;;
+    esac
+  }
+  systemctl() {
+    case "$*" in
+      'enable fail2ban'|'restart fail2ban') return 0;;
+      'status fail2ban --no-pager -l') return 0;;
+      *) return 1;;
+    esac
+  }
+  journalctl() { return 0; }
+  sleep() { :; }
+  confirm() { echo 'Unexpected confirmation' >&2; return 1; }
+  if fail2ban_setup >/dev/null 2>&1; then
+    echo 'Setup falsely succeeded without Fail2ban socket' >&2
+    return 1
+  fi
+  [[ "$status_checks" -ge 2 ]] || return 1
+  grep -Fxq '# previous working configuration' "$fixture_cfg"
+)
+
+test_fail2ban_setup_failure_on_first_install_removes_partial_jail() (
+  local dir fixture_cfg
+  dir="$(mktemp -d)"
+  trap 'rm -rf -- "$dir"' EXIT
+  fixture_cfg="$dir/90-srv-settings.local"
+  fail2ban_setup_path() { printf '%s\n' "$fixture_cfg"; }
+  packages() { return 0; }
+  backup() { return 0; }
+  ssh_ports() { printf '22\n'; }
+  fail2ban-client() {
+    [[ "$*" == '-t' ]] && return 0
+    return 1
+  }
+  systemctl() {
+    case "$*" in
+      'enable fail2ban'|'restart fail2ban'|'status fail2ban --no-pager -l') return 0;;
+      *) return 1;;
+    esac
+  }
+  journalctl() { return 0; }
+  sleep() { :; }
+  confirm() { return 1; }
+  if fail2ban_setup >/dev/null 2>&1; then return 1; fi
+  [[ ! -e "$fixture_cfg" ]]
+)
+
 test_fail2ban_ignore_add_remove_and_rollback() (
   local temp fail_validation
   temp="$(mktemp -d)"
