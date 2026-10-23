@@ -237,6 +237,125 @@ test_bootstrap_interactivity_contract() {
   grep -Fq 'if ! (: </dev/tty)' "$BASE_DIR/bootstrap.sh" || return 1
 }
 
+# SSH dialog should accept common pasted/CRLF input without changing any system service.
+test_ssh_auth_accepts_yes_with_crlf() (
+  local confirmations=0
+  packages() { return 0; }
+  ssh_ports() { printf '22\n'; }
+  ask_port() { PORT=2203; }
+  ask() { REPLY=
+  grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
+  grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh" || return 1
+  grep -Fq 'systemctl daemon-reload' "$BASE_DIR/modules/ssh.sh" || return 1
+  grep -Fq 'systemctl restart ssh.socket' "$BASE_DIR/modules/ssh.sh" || return 1
+}
+
+test_main_menu_has_no_docker() {
+  local menu="$BASE_DIR/setup.sh" expected
+  if grep -Eq "^[[:space:]]*source .*modules/docker.sh|^[[:space:]]*6\\) docker_menu;;|Docker \\(необязательно\\)" "$menu"; then
+    echo "Docker remains accessible in main menu" >&2
+    return 1
+  fi
+  for expected in \
+    "printf '6. Обновление системы / время\\n'" \
+    "printf '7. Диагностика\\n'" \
+    "printf '8. Резервное копирование конфигурации\\n'" \
+    '6) system_menu;;' \
+    '7) diagnostics;;' \
+    '8) backup_important;;' \
+    "Выберите пункт меню от 0 до 8"; do
+    grep -Fq -- "$expected" "$menu" || { echo "Missing menu entry: $expected" >&2; return 1; }
+  done
+}
+test_modules_load() {
+  local name
+  for name in system_setup user_create ssh_apply ufw_setup fail2ban_setup docker_mirrors diagnostics; do
+    declare -F "$name" >/dev/null || return 1
+  done
+}
+
+passed=0
+failed=0
+for test_fn in $(compgen -A function test_ | LC_ALL=C sort); do
+  printf 'RUN %-38s' "$test_fn"
+  if ( "$test_fn" ); then
+    printf 'OK\n'
+    ((passed+=1))
+  else
+    printf 'FAILED\n' >&2
+    ((failed+=1))
+  fi
+done
+printf '\nBash: %d passed, %d failed\n' "$passed" "$failed"
+((failed==0))
+  YES\r'; }
+  confirm() { ((confirmations+=1)); return 1; }
+  ufw() { echo 'UFW must not be called before confirmation' >&2; return 1; }
+  ssh_apply >/dev/null 2>&1 || return 1
+  (( confirmations >= 2 ))
+)
+
+test_ssh_auth_accepts_no_with_whitespace() (
+  local confirmations=0
+  packages() { return 0; }
+  ssh_ports() { printf '22\n'; }
+  ask_port() { PORT=2203; }
+  ask() { REPLY=
+  grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
+  grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh" || return 1
+  grep -Fq 'systemctl daemon-reload' "$BASE_DIR/modules/ssh.sh" || return 1
+  grep -Fq 'systemctl restart ssh.socket' "$BASE_DIR/modules/ssh.sh" || return 1
+}
+
+test_main_menu_has_no_docker() {
+  local menu="$BASE_DIR/setup.sh" expected
+  if grep -Eq "^[[:space:]]*source .*modules/docker.sh|^[[:space:]]*6\\) docker_menu;;|Docker \\(необязательно\\)" "$menu"; then
+    echo "Docker remains accessible in main menu" >&2
+    return 1
+  fi
+  for expected in \
+    "printf '6. Обновление системы / время\\n'" \
+    "printf '7. Диагностика\\n'" \
+    "printf '8. Резервное копирование конфигурации\\n'" \
+    '6) system_menu;;' \
+    '7) diagnostics;;' \
+    '8) backup_important;;' \
+    "Выберите пункт меню от 0 до 8"; do
+    grep -Fq -- "$expected" "$menu" || { echo "Missing menu entry: $expected" >&2; return 1; }
+  done
+}
+test_modules_load() {
+  local name
+  for name in system_setup user_create ssh_apply ufw_setup fail2ban_setup docker_mirrors diagnostics; do
+    declare -F "$name" >/dev/null || return 1
+  done
+}
+
+passed=0
+failed=0
+for test_fn in $(compgen -A function test_ | LC_ALL=C sort); do
+  printf 'RUN %-38s' "$test_fn"
+  if ( "$test_fn" ); then
+    printf 'OK\n'
+    ((passed+=1))
+  else
+    printf 'FAILED\n' >&2
+    ((failed+=1))
+  fi
+done
+printf '\nBash: %d passed, %d failed\n' "$passed" "$failed"
+((failed==0))
+no \t'; }
+  confirm() { ((confirmations+=1)); return 1; }
+  ufw() { echo 'Unexpected UFW operation' >&2; return 1; }
+  ssh_apply >/dev/null 2>&1 || return 1
+  (( confirmations >= 2 ))
+)
+
+test_bootstrap_bypasses_main_archive_cache() {
+  grep -Fq 'main.tar.gz?cache_bust=' "$BASE_DIR/bootstrap.sh" || return 1
+  grep -Fq "Cache-Control: no-cache" "$BASE_DIR/bootstrap.sh" || return 1
+}
 test_ssh_rollback_contract() {
   grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
   grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh" || return 1
