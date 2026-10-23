@@ -44,7 +44,7 @@ main_menu() {
     printf '8. Дополнительные настройки\n'
     printf '0. Выход\n'
     printf '=====================================\n'
-    read -r -p 'Выбор: ' choice || { printf '\n'; return 0; }
+    read_input 'Выбор: ' choice || { printf '\n'; return 0; }
     case "$choice" in
       1) full_setup || warn 'Настройка остановлена из-за ошибки';;
       2) ufw_menu;;
