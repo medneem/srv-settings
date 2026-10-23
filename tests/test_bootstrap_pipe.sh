@@ -27,21 +27,32 @@ cat > "$temp/mock/curl" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 output=''
+url=''
 while (( $# > 0 )); do
   case "$1" in
     -o) output="$2"; shift 2;;
+    http*) url="$1"; shift;;
     *) shift;;
   esac
 done
 [[ -n "$output" ]]
-cp -- "$TEST_ARCHIVE" "$output"
+case "$url" in
+  *api.github.com/repos/medneem/srv-settings/commits/main*)
+    printf '{"sha":"%s"}\n' "$TEST_FAKE_SHA" > "$output"
+    ;;
+  "https://codeload.github.com/medneem/srv-settings/tar.gz/$TEST_FAKE_SHA")
+    cp -- "$TEST_ARCHIVE" "$output"
+    ;;
+  *) printf 'Unexpected curl URL: %s\n' "$url" >&2; exit 1;;
+esac
 MOCK
 chmod +x "$temp/mock/curl"
+fake_sha=0123456789abcdef0123456789abcdef01234567
 receipt="$temp/receipt.txt"
 # The bootstrap comes from a pipe; setup.sh must read from /dev/tty.
 # 'script' creates the pseudoterminal that CI does not normally provide.
 { sleep 1; printf 'tty-ok\n'; sleep 1; } |
-  script -q -e -c "cat '$BASE_DIR/bootstrap.sh' | sudo env PATH='$temp/mock:$PATH' TEST_ARCHIVE='$temp/fixture.tar.gz' TEST_RECEIPT='$receipt' bash" /dev/null \
+  script -q -e -c "cat '$BASE_DIR/bootstrap.sh' | sudo env PATH='$temp/mock:$PATH' TEST_ARCHIVE='$temp/fixture.tar.gz' TEST_FAKE_SHA='$fake_sha' TEST_RECEIPT='$receipt' bash" /dev/null \
   > "$temp/output.log" 2>&1 || {
     cat "$temp/output.log" >&2
     exit 1
@@ -51,4 +62,9 @@ if [[ "$(cat "$receipt" 2>/dev/null)" != tty-ok ]]; then
   echo "Menu did not read from the tty" >&2
   exit 1
 fi
+if [[ "$(cat "$target/.installed-commit" 2>/dev/null)" != "$fake_sha" ]]; then
+  echo "Installed revision did not match immutable archive" >&2
+  exit 1
+fi
+grep -Fq "$fake_sha" "$temp/output.log"
 printf 'bootstrap curl-pipe interactive smoke test: OK\n'
