@@ -279,6 +279,160 @@ test_ssh_auth_accepts_plain_yes_from_read() (
 test_ssh_status_shows_service_and_socket() {
   grep -Fq "systemctl status ssh.service ssh.socket" "$BASE_DIR/modules/ssh.sh"
 }
+# CRLF/pasted input is visually "y" but used to silently decline root SSH changes.
+test_confirm_accepts_yes_from_crlf() (
+  printf 'y\r\n' | confirm 'Подтвердить отключение root?' >/dev/null
+)
+
+test_confirm_accepts_yes_with_spaces() (
+  printf '  YES  \r\n' | confirm 'Подтвердить?' >/dev/null
+)
+
+test_confirm_negative_answers_remain_safe() (
+  local value
+  for value in '' 'n' 'N' 'no' 'nope' 'yesplease' 'y?'; do
+    if printf '%s\n' "$value" | confirm 'Подтвердить?' >/dev/null 2>&1; then
+      printf 'Unexpectedly accepted affirmative: %q\n' "$value" >&2
+      return 1
+    fi
+  done
+)
+
+test_ssh_root_confirmation_crlf_changes_preview_only() (
+  packages() { return 0; }
+  ssh_ports() { echo 22; }
+  ask_port() { PORT=2203; }
+  ask() { REPLY=yes; }
+  ssh_prepare_login_target() { SSH_LOGIN_TARGET='admins@203.0.113.42'; }
+  ufw() { echo 'Unexpected UFW changes!' >&2; return 1; }
+  local transcript
+  transcript="$(ssh_apply <<< 
+  local calls=0 transcript transcript_file
+  transcript_file="$(mktemp)"
+  trap 'rm -f "$transcript_file"' EXIT
+  packages() { return 0; }
+  ssh_ports() { printf '22\n'; }
+  ask_port() { PORT=2203; }
+  SSH_CONNECTION='198.51.100.7 53842 203.0.113.42 22'
+  SUDO_USER=''
+  getent() { printf 'sudo:x:27:deploy\n'; }
+  id() { [[ "${1:-}" == deploy ]]; }
+  ask() { REPLY=yes; }
+  confirm() { ((calls+=1)); [[ "$calls" == 1 ]]; }
+  ufw() { echo "Unexpected UFW call" >&2; return 1; }
+  ssh_apply >"$transcript_file" 2>&1 || return 1
+  transcript="$(cat "$transcript_file")"
+  [[ "$transcript" == *"ssh -p 22 deploy@203.0.113.42"* ]] || return 1
+  [[ "$transcript" == *"sudo -v && sudo id -u"* ]] || return 1
+  [[ "$transcript" == *"Enter (N)"* ]] || return 1
+  [[ "$transcript" == *"Root SSH оставлен без изменений"* ]] || return 1
+  [[ "$calls" == 3 ]]
+)
+test_ssh_login_target_uses_ssh_connection_and_sudo_user() (
+  SSH_CONNECTION='198.51.100.9 55012 203.0.113.42 22'
+  SSH_CLIENT='198.51.100.9 55012 10.0.0.5'
+  SUDO_USER='deploy'
+  id() { [[ "${1:-}" == deploy ]]; }
+  ask() { echo "Unexpected prompt: $1" >&2; return 1; }
+  ssh_prepare_login_target || return 1
+  eq "$SSH_LOGIN_TARGET" "deploy@203.0.113.42"
+)
+
+test_ssh_login_target_unique_sudo_member() (
+  SSH_CONNECTION='198.51.100.9 55012 203.0.113.42 22'
+  SUDO_USER='root'
+  getent() { printf 'sudo:x:27:admins\n'; }
+  id() { [[ "${1:-}" == admins ]]; }
+  ask() { echo "Unexpected prompt: $1" >&2; return 1; }
+  ssh_prepare_login_target || return 1
+  eq "$SSH_LOGIN_TARGET" "admins@203.0.113.42"
+)
+
+test_ssh_login_target_ipv6() (
+  SSH_CONNECTION='2001:db8::99 44422 2001:db8::5 22'
+  SUDO_USER='deploy'
+  id() { [[ "${1:-}" == deploy ]]; }
+  ask() { echo "Unexpected prompt" >&2; return 1; }
+  ssh_prepare_login_target || return 1
+  eq "$SSH_LOGIN_TARGET" "deploy@2001:db8::5"
+)
+
+test_ssh_login_target_missing_context_prompts() (
+  SSH_CONNECTION=''
+  SSH_CLIENT=''
+  SUDO_USER='root'
+  getent() { printf "sudo:x:27:admins,operator\n"; }
+  id() { [[ "${1:-}" == admins || "${1:-}" == operator ]]; }
+  ask() {
+    case "$1" in
+      *"пользователя"*) REPLY=admins;;
+      *"Адрес сервера"*) REPLY=ssh.example.org;;
+      *) echo "Unexpected prompt: $1" >&2; return 1;;
+    esac
+  }
+  ssh_prepare_login_target || return 1
+  eq "$SSH_LOGIN_TARGET" "admins@ssh.example.org"
+)
+
+test_ssh_login_target_rejects_unsafe_hostname() (
+  SSH_CONNECTION=''
+  SSH_CLIENT=''
+  SUDO_USER='deploy'
+  id() { [[ "${1:-}" == deploy ]]; }
+  ask() { REPLY='example.org;touch /tmp/injected'; }
+  if ssh_prepare_login_target >/dev/null 2>&1; then return 1; fi
+  [[ -z "${SSH_LOGIN_TARGET:-}" ]]
+)
+test_ssh_rollback_contract() {
+  grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
+  grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh" || return 1
+  grep -Fq 'systemctl daemon-reload' "$BASE_DIR/modules/ssh.sh" || return 1
+  grep -Fq 'systemctl restart ssh.socket' "$BASE_DIR/modules/ssh.sh" || return 1
+}
+
+test_main_menu_has_no_docker() {
+  local menu="$BASE_DIR/setup.sh" expected
+  if grep -Eq "^[[:space:]]*source .*modules/docker.sh|^[[:space:]]*6\\) docker_menu;;|Docker \\(необязательно\\)" "$menu"; then
+    echo "Docker remains accessible in main menu" >&2
+    return 1
+  fi
+  for expected in \
+    "printf '6. Обновление системы / время\\n'" \
+    "printf '7. Диагностика\\n'" \
+    "printf '8. Резервное копирование конфигурации\\n'" \
+    '6) system_menu;;' \
+    '7) diagnostics;;' \
+    '8) backup_important;;' \
+    "Выберите пункт меню от 0 до 8"; do
+    grep -Fq -- "$expected" "$menu" || { echo "Missing menu entry: $expected" >&2; return 1; }
+  done
+}
+test_modules_load() {
+  local name
+  for name in system_setup user_create ssh_apply ufw_setup fail2ban_setup docker_mirrors diagnostics; do
+    declare -F "$name" >/dev/null || return 1
+  done
+}
+
+passed=0
+failed=0
+for test_fn in $(compgen -A function test_ | LC_ALL=C sort); do
+  printf 'RUN %-38s' "$test_fn"
+  if ( "$test_fn" ); then
+    printf 'OK\n'
+    ((passed+=1))
+  else
+    printf 'FAILED\n' >&2
+    ((failed+=1))
+  fi
+done
+printf '\nBash: %d passed, %d failed\n' "$passed" "$failed"
+((failed==0))
+y\r\ny\r\nn\n' 2>&1)" || return 1
+  [[ "$transcript" == *'PermitRootLogin=no'* ]] || return 1
+  [[ "$transcript" != *'Root SSH оставлен без изменений'* ]]
+)
+
 test_ssh_root_lockout_prompt_explains_safe_check() (
   local calls=0 transcript transcript_file
   transcript_file="$(mktemp)"
