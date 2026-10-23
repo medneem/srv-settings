@@ -81,15 +81,6 @@ docker_install() {
   fi
   chmod 0644 "$sources_stage" || { rm -f -- "$key_stage" "$sources_stage"; return 1; }
 
-  # Only after credentials and metadata are staged do we remove conflicts.
-  if (( ${#conflicts[@]} > 0 )); then
-    if ! DEBIAN_FRONTEND=noninteractive apt-get remove -y "${conflicts[@]}"; then
-      rm -f -- "$key_stage" "$sources_stage"
-      fail 'Не удалось удалить конфликтующие пакеты.'
-      return 1
-    fi
-  fi
-
   if [[ -f "$key_path" ]] && ! cmp -s -- "$key_path" "$key_stage"; then
     backup "$key_path" || { rm -f -- "$key_stage" "$sources_stage"; return 1; }
   fi
@@ -108,6 +99,19 @@ docker_install() {
   fi
 
   apt-get update || { fail 'APT: не удалось обновить индекс Docker-репозитория.'; return 1; }
+  # Never remove an existing engine before the official repository and its
+  # Docker CE candidate have been verified on this Ubuntu release.
+  if ! LC_ALL=C apt-cache policy docker-ce |
+       awk '$1 == "Candidate:" && $2 != "(none)" {found=1} END {exit !found}'; then
+    fail 'APT: официальный docker-ce недоступен для этой версии/архитектуры Ubuntu.'
+    return 1
+  fi
+  if (( ${#conflicts[@]} > 0 )); then
+    if ! DEBIAN_FRONTEND=noninteractive apt-get remove -y "${conflicts[@]}"; then
+      fail 'Не удалось удалить конфликтующие пакеты.'
+      return 1
+    fi
+  fi
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || {
     fail 'APT: установка Docker завершилась ошибкой; проверьте вывод APT.'
