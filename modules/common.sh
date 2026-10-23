@@ -31,7 +31,7 @@ validate_port() {
 ask_port() {
   while true; do
     ask "$1" "$2" || return 1
-    if validate_port "$REPLY"; then PORT="$((10#REPLY))"; return 0; fi
+    if validate_port "$REPLY"; then PORT="$((10#$REPLY))"; return 0; fi
     warn 'Допустимый порт: 1–65535'
   done
 }
