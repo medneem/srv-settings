@@ -274,7 +274,7 @@ ssh_menu() {
   local n
   while true; do
     printf '\nSSH\n1. Порт, парольная аутентификация и root (с откатом)\n2. Показать действующую конфигурацию\n0. Назад\n'
-    read -r -p 'Выбор: ' n || return 0
+    read_input 'Выбор: ' n || return 0
     case $n in
       1) ssh_apply;;
       2) /usr/sbin/sshd -T 2>/dev/null | grep -E '^(port|passwordauthentication|permitrootlogin|allowusers) '; systemctl status ssh.service ssh.socket --no-pager -l || true;;
