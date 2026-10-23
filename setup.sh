@@ -18,7 +18,6 @@ source "$BASE_DIR/modules/users.sh"
 source "$BASE_DIR/modules/ssh.sh"
 source "$BASE_DIR/modules/firewall.sh"
 source "$BASE_DIR/modules/fail2ban.sh"
-source "$BASE_DIR/modules/docker.sh"
 source "$BASE_DIR/modules/diagnostics.sh"
 source "$BASE_DIR/modules/full_setup.sh"
 
@@ -38,10 +37,9 @@ main_menu() {
     printf '3. Настройка SSH\n'
     printf '4. Управление пользователями и sudo\n'
     printf '5. Настройка Fail2ban\n'
-    printf '6. Docker (необязательно)\n'
-    printf '7. Обновление системы / время\n'
-    printf '8. Диагностика\n'
-    printf '9. Резервное копирование конфигурации\n'
+    printf '6. Обновление системы / время\n'
+    printf '7. Диагностика\n'
+    printf '8. Резервное копирование конфигурации\n'
     printf '0. Выход\n'
     printf '=====================================\n'
     read -r -p 'Выбор: ' choice || { printf '\n'; return 0; }
@@ -51,12 +49,11 @@ main_menu() {
       3) ssh_menu;;
       4) users_menu;;
       5) fail2ban_menu;;
-      6) docker_menu;;
-      7) system_menu;;
-      8) diagnostics;;
-      9) backup_important;;
+      6) system_menu;;
+      7) diagnostics;;
+      8) backup_important;;
       0) info 'Выход'; return 0;;
-      *) warn 'Выберите пункт меню от 0 до 9';;
+      *) warn 'Выберите пункт меню от 0 до 8';;
     esac
   done
 }
