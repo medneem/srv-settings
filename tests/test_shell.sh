@@ -41,22 +41,176 @@ test_full_setup_without_docker() (
 )
 
 # Optional Docker menu must be a no-op on systems without Docker.
-test_missing_docker_is_not_an_error() (
+# Merely opening the optional Docker menu must never install anything.
+test_missing_docker_menu_is_safe() (
   local logfile
   logfile="$(mktemp)"
   trap 'rm -f "$logfile"' EXIT
   command() {
-    if [[ "${1:-}" == -v && "${2:-}" == docker ]]; then return 1; fi
+    if [[ "$1" == -v && "$2" == docker ]]; then return 1; fi
     builtin command "$@"
   }
   info() { echo "$*" >> "$logfile"; }
   packages() { echo UNEXPECTED_PACKAGES >> "$logfile"; return 1; }
   backup() { echo UNEXPECTED_BACKUP >> "$logfile"; return 1; }
-  docker_menu || return 1
+  docker_menu <<< 0 || return 1
   docker_mirrors || return 1
-  if grep -Eq "UNEXPECTED_" "$logfile"; then cat "$logfile" >&2; return 1; fi
-  grep -Fq "Docker не установлен" "$logfile"
+  if grep -Eq 'UNEXPECTED_' "$logfile"; then cat "$logfile" >&2; return 1; fi
+  grep -Fq 'Docker не установлен' "$logfile"
 )
+
+test_docker_supported_ubuntu_codenames() (
+  VERSION_ID=22.04
+  eq "$(docker_ubuntu_codename)" jammy || return 1
+  VERSION_ID=24.04
+  eq "$(docker_ubuntu_codename)" noble || return 1
+  VERSION_ID=26.04
+  eq "$(docker_ubuntu_codename)" resolute || return 1
+  VERSION_ID=20.04
+  if docker_ubuntu_codename >/dev/null 2>&1; then return 1; fi
+)
+
+test_docker_install_declined_no_mutation() (
+  local logfile
+  VERSION_ID=22.04
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  confirm() { return 1; }
+  packages() { echo packages >> "$logfile"; return 1; }
+  apt-get() { echo apt >> "$logfile"; return 1; }
+  curl() { echo curl >> "$logfile"; return 1; }
+  docker_install || return 1
+  [[ ! -s "$logfile" ]]
+)
+
+test_docker_install_uses_official_repo_and_compose() (
+  local temp logfile
+  temp="$(mktemp -d)"
+  trap 'rm -rf "$temp"' EXIT
+  logfile="$temp/operations"
+  VERSION_ID=24.04
+  docker_repo_key_path() { printf '%s\n' "$temp/keyrings/docker.asc"; }
+  docker_repo_sources_path() { printf '%s\n' "$temp/sources/docker.sources"; }
+  confirm() { return 0; }
+  packages() { return 0; }
+  backup() { return 0; }
+  dpkg-query() { return 1; }
+  dpkg() { printf 'amd64\n'; }
+  curl() {
+    local last='' arg
+    for arg in "$@"; do
+      if [[ "$last" == -o ]]; then
+        printf '%s\n' '-----BEGIN PGP PUBLIC KEY BLOCK-----' 'test' '-----END PGP PUBLIC KEY BLOCK-----' >"$arg"
+        return 0
+      fi
+      last="$arg"
+    done
+    return 1
+  }
+  apt-get() { printf 'apt-get %s\n' "$*" >> "$logfile"; }
+  apt-cache() { printf '  Candidate: 5:29.0.0\n'; }
+  systemctl() { printf 'systemctl %s\n' "$*" >> "$logfile"; }
+  docker() {
+    case "$*" in
+      --version) printf 'Docker test\n';;
+      'compose version') printf 'Docker Compose test\n';;
+      *) return 1;;
+    esac
+  }
+  docker_install || return 1
+  grep -Fq 'URIs: https://download.docker.com/linux/ubuntu' "$temp/sources/docker.sources" || return 1
+  grep -Fq 'Suites: noble' "$temp/sources/docker.sources" || return 1
+  grep -Fq 'Architectures: amd64' "$temp/sources/docker.sources" || return 1
+  grep -Fq "Signed-By: $temp/keyrings/docker.asc" "$temp/sources/docker.sources" || return 1
+  grep -Fq 'apt-get update' "$logfile" || return 1
+  grep -Fq 'apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin' "$logfile" || return 1
+  grep -Fq 'systemctl enable --now docker' "$logfile" || return 1
+)
+
+test_docker_does_not_remove_conflicts_when_repository_unavailable() (
+  local temp logfile
+  temp="$(mktemp -d)"
+  trap 'rm -rf "$temp"' EXIT
+  logfile="$temp/removed"
+  VERSION_ID=22.04
+  docker_repo_key_path() { printf '%s\n' "$temp/keyrings/docker.asc"; }
+  docker_repo_sources_path() { printf '%s\n' "$temp/sources/docker.sources"; }
+  confirm() { return 0; }
+  packages() { return 0; }
+  dpkg() { echo amd64; }
+  dpkg-query() {
+    if [[ "$*" == *docker.io* ]]; then printf 'install ok installed'; return 0; fi
+    return 1
+  }
+  curl() {
+    local previous='' arg
+    for arg in "$@"; do
+      if [[ "$previous" == -o ]]; then
+        printf '%s\n' '-----BEGIN PGP PUBLIC KEY BLOCK-----' 'test' >"$arg"
+        return 0
+      fi
+      previous="$arg"
+    done
+    return 1
+  }
+  apt-get() {
+    if [[ "$1" == remove ]]; then echo 'removed!' >"$logfile"; return 0; fi
+    [[ "$1" == update ]] && return 1
+    return 1
+  }
+  apt-cache() { return 1; }
+  if docker_install >/dev/null 2>&1; then return 1; fi
+  [[ ! -e "$logfile" ]]
+)
+
+test_docker_invalid_gpg_key_does_not_write_sources() (
+  local temp logfile
+  temp="$(mktemp -d)"
+  trap 'rm -rf "$temp"' EXIT
+  logfile="$temp/apt.log"
+  VERSION_ID=26.04
+  docker_repo_key_path() { printf '%s\n' "$temp/keyrings/docker.asc"; }
+  docker_repo_sources_path() { printf '%s\n' "$temp/sources/docker.sources"; }
+  confirm() { return 0; }
+  packages() { return 0; }
+  dpkg-query() { return 1; }
+  dpkg() { echo amd64; }
+  curl() {
+    local last='' arg
+    for arg in "$@"; do
+      if [[ "$last" == -o ]]; then
+        printf '%s\n' 'not a PGP public key' > "$arg"
+        return 0
+      fi
+      last="$arg"
+    done
+    return 1
+  }
+  apt-get() { printf '%s\n' "$*" >> "$logfile"; return 1; }
+  if docker_install >/dev/null 2>&1; then return 1; fi
+  [[ ! -e "$temp/keyrings/docker.asc" &&
+     ! -e "$temp/sources/docker.sources" &&
+     ! -e "$logfile" ]]
+)
+
+test_docker_conflicting_packages_require_separate_approval() (
+  local temp logfile prompts=0
+  temp="$(mktemp -d)"
+  trap 'rm -rf "$temp"' EXIT
+  logfile="$temp/operations"
+  VERSION_ID=22.04
+  confirm() { ((prompts+=1)); [[ "$prompts" -eq 1 ]]; }
+  dpkg-query() {
+    if [[ "$*" == *docker.io* ]]; then printf 'install ok installed'; return 0; fi
+    return 1
+  }
+  apt-get() { echo apt >> "$logfile"; return 1; }
+  curl() { echo curl >> "$logfile"; return 1; }
+  packages() { echo packages >> "$logfile"; return 1; }
+  docker_install >/dev/null 2>&1 || return 1
+  [[ "$prompts" == 2 && ! -e "$logfile" ]]
+)
+
 test_ubuntu_release_support() {
   local ver
   for ver in 22.04 24.04 26.04; do
@@ -395,22 +549,23 @@ test_ssh_rollback_contract() {
   grep -Fq 'systemctl restart ssh.socket' "$BASE_DIR/modules/ssh.sh" || return 1
 }
 
-test_main_menu_has_no_docker() {
+test_main_menu_has_additional_section_no_backup_item() {
   local menu="$BASE_DIR/setup.sh" expected
-  if grep -Eq "^[[:space:]]*source .*modules/docker.sh|^[[:space:]]*6\\) docker_menu;;|Docker \\(необязательно\\)" "$menu"; then
-    echo "Docker remains accessible in main menu" >&2
+  if grep -Fq "printf '8. Резервное копирование" "$menu" ||
+     grep -Fq '8) backup_important;;' "$menu" ||
+     grep -Fq '8) docker_menu;;' "$menu"; then
+    echo "Unwanted top-level backup or Docker entry" >&2
     return 1
   fi
   for expected in \
-    "printf '6. Обновление системы / время\\n'" \
-    "printf '7. Диагностика\\n'" \
-    "printf '8. Резервное копирование конфигурации\\n'" \
+    "printf '8. Дополнительные настройки\\n'" \
+    '8) additional_menu;;' \
+    'source "$BASE_DIR/modules/docker.sh"' \
     '6) system_menu;;' \
-    '7) diagnostics;;' \
-    '8) backup_important;;' \
-    "Выберите пункт меню от 0 до 8"; do
-    grep -Fq -- "$expected" "$menu" || { echo "Missing menu entry: $expected" >&2; return 1; }
+    '7) diagnostics;;'; do
+    grep -Fq -- "$expected" "$menu" || { echo "Missing menu item: $expected" >&2; return 1; }
   done
+  grep -Fq "1. Docker" "$BASE_DIR/modules/docker.sh"
 }
 test_modules_load() {
   local name
