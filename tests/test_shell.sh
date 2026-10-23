@@ -325,6 +325,76 @@ test_sudo_nopasswd_menu_uses_same_safe_helper() (
   [[ "$called" == 1 ]]
 )
 
+test_sudo_group_nopasswd_decline_has_no_side_effects() (
+  confirm() { return 1; }
+  sudo_group_sudoers_path() { echo 'UNEXPECTED sudoers lookup' >&2; return 1; }
+  visudo() { echo 'UNEXPECTED visudo' >&2; return 1; }
+  backup() { echo 'UNEXPECTED backup' >&2; return 1; }
+  sudo_group_nopasswd
+)
+
+test_sudo_group_nopasswd_changes_only_matching_line() (
+  local directory config count=0
+  directory="$(mktemp -d)"
+  trap 'rm -rf "$directory"' EXIT
+  config="$directory/sudoers"
+  printf 'root ALL=(ALL:ALL) ALL\n%%sudo ALL=(ALL:ALL) ALL\n@includedir /etc/sudoers.d\n' > "$config"
+  sudo_group_sudoers_path() { printf '%s\n' "$config"; }
+  sudo_group_sudoers_stage() { mktemp "$directory/.stage.XXXXXXXX"; }
+  confirm() { return 0; }
+  visudo() {
+    [[ "$1" == -cf ]] || return 1
+    grep -Fxq '%sudo ALL=(ALL:ALL) NOPASSWD: ALL' "$2" || return 1
+    ((count+=1))
+    return 0
+  }
+  backup() { [[ "$1" == "$config" ]]; }
+  reboot() { echo 'UNEXPECTED reboot' >&2; return 1; }
+  sudo_group_nopasswd || return 1
+  [[ "$(cat "$config")" == "$(printf 'root ALL=(ALL:ALL) ALL\n%%sudo ALL=(ALL:ALL) NOPASSWD: ALL\n@includedir /etc/sudoers.d')" ]] || return 1
+  [[ "$(stat -c %a "$config")" == 440 ]] || return 1
+  (( count >= 2 )) || return 1
+  sudo_group_nopasswd || return 1
+  [[ "$(find "$directory" -maxdepth 1 -type f | wc -l)" == 1 ]]
+)
+
+test_sudo_group_nopasswd_invalid_candidate_keeps_original() (
+  local directory config
+  directory="$(mktemp -d)"
+  trap 'rm -rf "$directory"' EXIT
+  config="$directory/sudoers"
+  printf '%%sudo ALL=(ALL:ALL) ALL\n' > "$config"
+  sudo_group_sudoers_path() { printf '%s\n' "$config"; }
+  sudo_group_sudoers_stage() { mktemp "$directory/.stage.XXXXXXXX"; }
+  confirm() { return 0; }
+  visudo() { return 1; }
+  backup() { echo 'UNEXPECTED backup' >&2; return 1; }
+  if sudo_group_nopasswd >/dev/null 2>&1; then return 1; fi
+  grep -Fxq '%sudo ALL=(ALL:ALL) ALL' "$config" || return 1
+  [[ "$(find "$directory" -maxdepth 1 -type f | wc -l)" == 1 ]]
+)
+
+test_sudo_group_nopasswd_absent_rule_fails_closed() (
+  local directory config
+  directory="$(mktemp -d)"
+  trap 'rm -rf "$directory"' EXIT
+  config="$directory/sudoers"
+  printf 'root ALL=(ALL:ALL) ALL\n' > "$config"
+  sudo_group_sudoers_path() { printf '%s\n' "$config"; }
+  sudo_group_sudoers_stage() { mktemp "$directory/.stage.XXXXXXXX"; }
+  confirm() { return 0; }
+  visudo() { echo 'UNEXPECTED visudo' >&2; return 1; }
+  backup() { echo 'UNEXPECTED backup' >&2; return 1; }
+  if sudo_group_nopasswd >/dev/null 2>&1; then return 1; fi
+  grep -Fxq 'root ALL=(ALL:ALL) ALL' "$config" || return 1
+  [[ "$(find "$directory" -maxdepth 1 -type f | wc -l)" == 1 ]]
+)
+
+test_sudo_group_menu_has_distinct_high_risk_option() {
+  grep -Fq '3. NOPASSWD для всей группы sudo' "$BASE_DIR/modules/users.sh" || return 1
+  grep -Fq '3) sudo_group_nopasswd;;' "$BASE_DIR/modules/users.sh"
+}
+
 test_ubuntu_release_support() {
   local ver
   for ver in 22.04 24.04 26.04; do
