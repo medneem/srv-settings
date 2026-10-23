@@ -17,7 +17,11 @@ fi
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 echo "Загрузка srv-settings..."
-curl -fLSs --retry 3 -o "$tmp/source.tar.gz" "https://github.com/medneem/srv-settings/archive/refs/heads/main.tar.gz"
+# A moving branch URL may be cached by CDN/proxy. Use a unique query per install.
+cache_bust="$(date +%s%N)-$"
+curl -fLSs --retry 3 -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+  -o "$tmp/source.tar.gz" \
+  "https://github.com/medneem/srv-settings/archive/refs/heads/main.tar.gz?cache_bust=$cache_bust"
 tar -xzf "$tmp/source.tar.gz" -C "$tmp"
 test -f "$tmp/srv-settings-main/setup.sh" || { echo "В репозитории отсутствует setup.sh" >&2; exit 1; }
 install -d -m 0755 /opt/srv-settings
