@@ -265,6 +265,20 @@ test_bootstrap_bypasses_main_archive_cache() {
   grep -Fq 'main.tar.gz?cache_bust=' "$BASE_DIR/bootstrap.sh" || return 1
   grep -Fq "Cache-Control: no-cache" "$BASE_DIR/bootstrap.sh" || return 1
 }
+test_ssh_auth_accepts_plain_yes_from_read() (
+  local confirmations=0
+  packages() { return 0; }
+  ssh_ports() { echo 22; }
+  ask_port() { PORT=2203; }
+  confirm() { ((confirmations+=1)); return 1; }
+  ufw() { echo 'Unexpected UFW action' >&2; return 1; }
+  ssh_apply <<< 'yes' >/dev/null 2>&1 || return 1
+  (( confirmations >= 2 ))
+)
+
+test_ssh_status_shows_service_and_socket() {
+  grep -Fq "systemctl status ssh.service ssh.socket" "$BASE_DIR/modules/ssh.sh"
+}
 test_ssh_rollback_contract() {
   grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
   grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh" || return 1
