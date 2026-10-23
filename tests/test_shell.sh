@@ -244,6 +244,23 @@ test_ssh_rollback_contract() {
   grep -Fq 'systemctl restart ssh.socket' "$BASE_DIR/modules/ssh.sh" || return 1
 }
 
+test_main_menu_has_no_docker() {
+  local menu="$BASE_DIR/setup.sh" expected
+  if grep -Eq "^[[:space:]]*source .*modules/docker.sh|^[[:space:]]*6\\) docker_menu;;|Docker \\(необязательно\\)" "$menu"; then
+    echo "Docker remains accessible in main menu" >&2
+    return 1
+  fi
+  for expected in \
+    "printf '6. Обновление системы / время\\n'" \
+    "printf '7. Диагностика\\n'" \
+    "printf '8. Резервное копирование конфигурации\\n'" \
+    '6) system_menu;;' \
+    '7) diagnostics;;' \
+    '8) backup_important;;' \
+    "Выберите пункт меню от 0 до 8"; do
+    grep -Fq -- "$expected" "$menu" || { echo "Missing menu entry: $expected" >&2; return 1; }
+  done
+}
 test_modules_load() {
   local name
   for name in system_setup user_create ssh_apply ufw_setup fail2ban_setup docker_mirrors diagnostics; do
