@@ -729,6 +729,15 @@ test_all_interactive_prompts_use_unicode_editor() {
   grep -Fq 'prepare_utf8_terminal' "$BASE_DIR/setup.sh"
 }
 
+test_allowusers_rollback_unit_uses_pid() {
+  local source="$BASE_DIR/modules/ssh.sh"
+  grep -Fq 'unit="srv-settings-allowusers-$"' "$source" || {
+    echo 'Rollback timer must be named with a numeric process ID (not a literal $)' >&2
+    return 1
+  }
+  grep -Fq 'ssh_allowusers_cancel_rollback "$unit"' "$source"
+}
+
 test_ssh_rollback_contract() {
   grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
   grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh" || return 1
