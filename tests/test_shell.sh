@@ -738,6 +738,32 @@ test_allowusers_rollback_unit_uses_pid() {
   grep -Fq 'ssh_allowusers_cancel_rollback "$unit"' "$source"
 }
 
+test_allowusers_cancel_rollback_success() (
+  local stopped=0 checked=0
+  systemctl() {
+    case "$1" in
+      stop) ((stopped+=1)); return 0 ;;
+      is-active) ((checked+=1)); return 1 ;;
+    esac
+    return 1
+  }
+  ssh_allowusers_cancel_rollback srv-settings-allowusers-123 || return 1
+  [[ "$stopped" == 1 && "$checked" == 1 ]]
+)
+
+test_allowusers_cancel_rollback_detects_active_timer() (
+  systemctl() {
+    case "$1" in
+      stop|is-active) return 0 ;;
+    esac
+    return 1
+  }
+  if ssh_allowusers_cancel_rollback srv-settings-allowusers-123 >/dev/null 2>&1; then
+    echo 'Active rollback timer was reported cancelled' >&2
+    return 1
+  fi
+)
+
 test_ssh_rollback_contract() {
   grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
   grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh" || return 1
