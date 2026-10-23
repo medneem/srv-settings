@@ -1,5 +1,83 @@
 #!/usr/bin/env bash
 
+# Find the sudo-capable login account without assuming the root SSH user is the new user.
+ssh_sudo_login_candidate() {
+  local name members
+  local -a candidates=()
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]] &&
+     [[ "$SUDO_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] && id "$SUDO_USER" >/dev/null 2>&1; then
+    printf '%s\n' "$SUDO_USER"
+    return 0
+  fi
+  members="$(getent group sudo 2>/dev/null)" || return 1
+  members="${members##*:}"
+  local -a names=()
+  IFS=',' read -r -a names <<< "$members"
+  for name in "${names[@]}"; do
+    [[ -n "$name" && "$name" != root && "$name" =~ ^[a-z_][a-z0-9_-]*$ ]] || continue
+    id "$name" >/dev/null 2>&1 || continue
+    candidates+=("$name")
+  done
+  if (( ${#candidates[@]} == 1 )); then
+    printf '%s\n' "${candidates[0]}"
+    return 0
+  fi
+  return 1
+}
+
+# SSH_CONNECTION: client IP, client port, *server IP*, server port.
+# SSH_CLIENT: client IP, client port, *server IP*.
+ssh_current_server_address() {
+  local client client_port server server_port
+  if [[ -n "${SSH_CONNECTION:-}" ]]; then
+    read -r client client_port server server_port <<< "$SSH_CONNECTION"
+  fi
+  if [[ -z "${server:-}" && -n "${SSH_CLIENT:-}" ]]; then
+    read -r client client_port server <<< "$SSH_CLIENT"
+  fi
+  case "${server:-}" in
+    ""|0.0.0.0|::|::1|localhost|127.*) return 1 ;;
+  esac
+  [[ "$server" =~ ^[a-zA-Z0-9:][a-zA-Z0-9._:%-]*$ ]] || return 1
+  printf '%s\n' "$server"
+}
+
+# Return a copy-ready target (user@server) in SSH_LOGIN_TARGET, or leave it blank.
+# Never guess if there is more than one possible login or no usable server address.
+ssh_prepare_login_target() {
+  SSH_LOGIN_TARGET=""
+  local name server
+  name="$(ssh_sudo_login_candidate)" || name=""
+  if [[ -z "$name" ]]; then
+    info "Не удалось однозначно определить пользователя с sudo."
+    ask 'Логин пользователя для проверки SSH' '' || return 1
+    name="$REPLY"
+  fi
+  if [[ ! "$name" =~ ^[a-z_][a-z0-9_-]*$ || "$name" == root ]] ||
+     ! id "$name" >/dev/null 2>&1; then
+    warn 'Некорректный логин или пользователь не существует; вход root не будет отключён.'
+    return 1
+  fi
+  server="$(ssh_current_server_address)" || server=""
+  if [[ -z "$server" ]]; then
+    info 'Не удалось получить адрес сервера из SSH_CONNECTION / SSH_CLIENT.'
+    ask 'Адрес сервера (IP или DNS, доступный с вашего компьютера)' '' || return 1
+    server="$REPLY"
+  fi
+  if [[ ! "$server" =~ ^[a-zA-Z0-9:][a-zA-Z0-9._:%-]*$ ]]; then
+    warn 'Некорректный адрес сервера; вход root не будет отключён.'
+    return 1
+  fi
+  case "$server" in
+    0.0.0.0|::|::1|localhost|127.*)
+      warn 'Указан локальный/неподходящий адрес; вход root не будет отключён.'
+      return 1
+      ;;
+  esac
+  SSH_LOGIN_TARGET="$name@$server"
+}
+
+
 # Normalize user input from SSH terminals, including pasted CRLF/whitespace.
 ssh_auth_mode_normalize() {
   local mode="${1,,}"
@@ -28,17 +106,25 @@ ssh_apply() {
     return 1
   fi
   root_mode="${current_root:-prohibit-password}"
+  local login_target=''
   if confirm 'Отключить SSH-вход root (PermitRootLogin no)?'; then
     warn 'После отключения root больше не сможет подключаться по SSH. Сначала проверьте другой способ входа!'
     info '1. НЕ закрывайте текущую SSH-сессию. Откройте ВТОРОЙ терминал на своём компьютере.'
-    info "2. Подключитесь под созданным пользователем на ТЕКУЩИЙ порт: ssh -p $oldport ИМЯ_ПОЛЬЗОВАТЕЛЯ@IP_СЕРВЕРА"
-    info '3. Выполните whoami — должно быть имя созданного пользователя, не root.'
-    info '4. Выполните: sudo -v && sudo id -u — после ввода пароля команда должна вывести 0.'
-    info 'Только после успешной проверки отвечайте y. Если не проверили — нажмите Enter (N).'
-    if confirm 'Уже вошли во ВТОРОМ SSH-сеансе под созданным пользователем и проверили sudo (вывод 0)?'; then
-      root_mode=no
+    if ssh_prepare_login_target; then
+      login_target="$SSH_LOGIN_TARGET"
+      info "2. Скопируйте команду ниже во ВТОРОЙ терминал (ТЕКУЩИЙ SSH-порт):"
+      printf '\n    ssh -p %s %s\n\n' "$oldport" "$login_target"
+      info '   Адрес взят из текущего SSH-подключения; проверьте, что он доступен из вашего терминала.'
+      info '3. Выполните whoami — должно быть имя созданного пользователя, не root.'
+      info '4. Выполните: sudo -v && sudo id -u — после ввода пароля команда должна вывести 0.'
+      info 'Только после успешной проверки отвечайте y. Если не проверили — нажмите Enter (N).'
+      if confirm 'Уже вошли во ВТОРОМ SSH-сеансе под созданным пользователем и проверили sudo (вывод 0)?'; then
+        root_mode=no
+      else
+        warn 'Root SSH оставлен без изменений'
+      fi
     else
-      warn 'Root SSH оставлен без изменений'
+      warn 'Не удалось составить команду проверки, вход root останется разрешённым.'
     fi
   fi
   warn "Новые настройки: port=$newport, PasswordAuthentication=$passwd_mode, PermitRootLogin=$root_mode"
@@ -112,7 +198,13 @@ ssh_apply() {
     return 1
   fi
 
-  info "SSH слушает $newport. В течение 5 минут проверьте НОВОЕ подключение: ssh -p $newport USER@SERVER"
+  info "SSH слушает $newport. В течение 5 минут проверьте НОВОЕ подключение из второго терминала:"
+  if [[ -n "$login_target" ]]; then
+    printf '\n    ssh -p %s %s\n\n' "$newport" "$login_target"
+  else
+    warn 'Для подключения используйте: ssh -p НОВЫЙ_ПОРТ ПОЛЬЗОВАТЕЛЬ@АДРЕС_СЕРВЕРА'
+    info "Новый SSH-порт: $newport"
+  fi
   if confirm 'Удалось войти в НОВОМ терминале по SSH? (yes отменяет автооткат)'; then
     systemctl stop "$unit.timer" || warn 'Не удалось отменить таймер: проверьте systemctl list-timers!'
     info 'Настройки сохранены. Старые порты UFW НЕ удалены; их можно закрыть позже вручную.'
