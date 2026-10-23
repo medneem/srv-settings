@@ -53,7 +53,7 @@ ufw_menu() {
   packages ufw || return 1
   while true; do
     printf '\nUFW\n1. Первоначальная настройка\n2. Разрешить TCP-порты\n3. Разрешить UDP-порты\n4. Удалить TCP-правила\n5. Удалить UDP-правила\n6. Список правил\n7. Переключить логирование\n0. Назад\n'
-    read -r -p 'Выбор: ' n || return 0
+    read_input 'Выбор: ' n || return 0
     case $n in
       1) ufw_setup;;
       2) ufw_allow_ports tcp;;
