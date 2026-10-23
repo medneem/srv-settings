@@ -249,6 +249,81 @@ test_allowusers_uses_main_config_not_sshd_dropin() {
   grep -Fq "ssh_allowusers.py" "$BASE_DIR/modules/ssh.sh" &&
   grep -Fq -- "--on-active=5min" "$BASE_DIR/modules/ssh.sh"
 }
+test_user_creation_offers_nopasswd_after_password() (
+  local transcript
+  transcript="$(mktemp)"
+  trap 'rm -f "$transcript"' EXIT
+  ask() { REPLY=admins; }
+  id() { return 0; }
+  usermod() { printf 'sudo group\n' >> "$transcript"; }
+  passwd() { printf 'password set\n' >> "$transcript"; }
+  sudo_nopasswd_for_user() { printf 'nopasswd %s\n' "$1" >> "$transcript"; }
+  ssh_allow_user_after_creation() { printf 'allowusers %s\n' "$1" >> "$transcript"; }
+  user_create || return 1
+  eq "$(cat "$transcript")" "$(printf 'sudo group\npassword set\nnopasswd admins\nallowusers admins')"
+)
+
+test_sudo_nopasswd_declined_never_writes() (
+  local touched=0
+  id() { return 0; }
+  confirm() { return 1; }
+  sudo_nopasswd_path() { ((touched+=1)); return 1; }
+  mktemp() { ((touched+=1)); return 1; }
+  visudo() { ((touched+=1)); return 1; }
+  sudo_nopasswd_for_user admins || return 1
+  [[ "$touched" == 0 ]]
+)
+
+test_sudo_nopasswd_creates_scoped_sudoers_and_idempotent() (
+  local folder target checks=0
+  folder="$(mktemp -d)"
+  trap 'rm -rf "$folder"' EXIT
+  target="$folder/90-srv-settings-admins"
+  id() { [[ "$1" == admins ]]; }
+  confirm() { return 0; }
+  sudo_nopasswd_path() { printf '%s\n' "$target"; }
+  sudo_nopasswd_stage() { mktemp "$folder/.sudo-XXXXXXXX"; }
+  visudo() {
+    [[ "$1" == -cf && -f "$2" ]] || return 1
+    grep -Fxq 'admins ALL=(ALL:ALL) NOPASSWD: ALL' "$2" || return 1
+    ((checks+=1))
+    return 0
+  }
+  backup() { [[ "$1" == "$target" ]]; }
+  sudo_nopasswd_for_user admins || return 1
+  [[ -f "$target" ]] || return 1
+  eq "$(cat "$target")" 'admins ALL=(ALL:ALL) NOPASSWD: ALL' || return 1
+  eq "$(stat -c %a "$target")" "440" || return 1
+  sudo_nopasswd_for_user admins || return 1
+  [[ "$checks" == 2 ]] || return 1
+  [[ "$(find "$folder" -maxdepth 1 -type f | wc -l)" -eq 1 ]]
+)
+
+test_sudo_nopasswd_invalid_config_does_not_replace_original() (
+  local folder target
+  folder="$(mktemp -d)"
+  trap 'rm -rf "$folder"' EXIT
+  target="$folder/90-srv-settings-admins"
+  printf 'existing rule\n' > "$target"
+  id() { return 0; }
+  confirm() { return 0; }
+  sudo_nopasswd_path() { printf '%s\n' "$target"; }
+  sudo_nopasswd_stage() { mktemp "$folder/.sudo-XXXXXXXX"; }
+  visudo() { return 1; }
+  backup() { echo 'Unexpected backup' >&2; return 1; }
+  if sudo_nopasswd_for_user admins >/dev/null 2>&1; then return 1; fi
+  eq "$(cat "$target")" 'existing rule' || return 1
+  [[ "$(find "$folder" -maxdepth 1 -type f | wc -l)" -eq 1 ]]
+)
+
+test_sudo_nopasswd_menu_uses_same_safe_helper() (
+  local called=0
+  ask() { REPLY=admins; }
+  sudo_nopasswd_for_user() { [[ "$1" == admins ]] && ((called+=1)); return 0; }
+  sudo_nopasswd || return 1
+  [[ "$called" == 1 ]]
+)
+
 test_ubuntu_release_support() {
   local ver
   for ver in 22.04 24.04 26.04; do
