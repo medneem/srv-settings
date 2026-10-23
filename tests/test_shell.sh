@@ -108,6 +108,7 @@ test_docker_install_uses_official_repo_and_compose() (
     return 1
   }
   apt-get() { printf 'apt-get %s\n' "$*" >> "$logfile"; }
+  apt-cache() { printf '  Candidate: 5:29.0.0\n'; }
   systemctl() { printf 'systemctl %s\n' "$*" >> "$logfile"; }
   docker() {
     case "$*" in
@@ -124,6 +125,42 @@ test_docker_install_uses_official_repo_and_compose() (
   grep -Fq 'apt-get update' "$logfile" || return 1
   grep -Fq 'apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin' "$logfile" || return 1
   grep -Fq 'systemctl enable --now docker' "$logfile" || return 1
+)
+
+test_docker_does_not_remove_conflicts_when_repository_unavailable() (
+  local temp logfile
+  temp="$(mktemp -d)"
+  trap 'rm -rf "$temp"' EXIT
+  logfile="$temp/removed"
+  VERSION_ID=22.04
+  docker_repo_key_path() { printf '%s\n' "$temp/keyrings/docker.asc"; }
+  docker_repo_sources_path() { printf '%s\n' "$temp/sources/docker.sources"; }
+  confirm() { return 0; }
+  packages() { return 0; }
+  dpkg() { echo amd64; }
+  dpkg-query() {
+    if [[ "$*" == *docker.io* ]]; then printf 'install ok installed'; return 0; fi
+    return 1
+  }
+  curl() {
+    local previous='' arg
+    for arg in "$@"; do
+      if [[ "$previous" == -o ]]; then
+        printf '%s\n' '-----BEGIN PGP PUBLIC KEY BLOCK-----' 'test' >"$arg"
+        return 0
+      fi
+      previous="$arg"
+    done
+    return 1
+  }
+  apt-get() {
+    if [[ "$1" == remove ]]; then echo 'removed!' >"$logfile"; return 0; fi
+    [[ "$1" == update ]] && return 1
+    return 1
+  }
+  apt-cache() { return 1; }
+  if docker_install >/dev/null 2>&1; then return 1; fi
+  [[ ! -e "$logfile" ]]
 )
 
 test_docker_invalid_gpg_key_does_not_write_sources() (
