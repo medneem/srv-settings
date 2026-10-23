@@ -731,7 +731,7 @@ test_all_interactive_prompts_use_unicode_editor() {
 
 test_allowusers_rollback_unit_uses_pid() {
   local source="$BASE_DIR/modules/ssh.sh"
-  grep -Fq 'unit="srv-settings-allowusers-$"' "$source" || {
+  grep -Fq 'unit="srv-settings-allowusers-$$"' "$source" || {
     echo 'Rollback timer must be named with a numeric process ID (not a literal $)' >&2
     return 1
   }
