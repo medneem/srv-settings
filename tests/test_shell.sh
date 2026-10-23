@@ -286,16 +286,75 @@ test_ssh_root_lockout_prompt_explains_safe_check() (
   packages() { return 0; }
   ssh_ports() { printf '22\n'; }
   ask_port() { PORT=2203; }
+  SSH_CONNECTION='198.51.100.7 53842 203.0.113.42 22'
+  SUDO_USER=''
+  getent() { printf 'sudo:x:27:deploy\n'; }
+  id() { [[ "${1:-}" == deploy ]]; }
   ask() { REPLY=yes; }
   confirm() { ((calls+=1)); [[ "$calls" == 1 ]]; }
   ufw() { echo "Unexpected UFW call" >&2; return 1; }
   ssh_apply >"$transcript_file" 2>&1 || return 1
   transcript="$(cat "$transcript_file")"
-  [[ "$transcript" == *"ssh -p 22 ИМЯ_ПОЛЬЗОВАТЕЛЯ@IP_СЕРВЕРА"* ]] || return 1
+  [[ "$transcript" == *"ssh -p 22 deploy@203.0.113.42"* ]] || return 1
   [[ "$transcript" == *"sudo -v && sudo id -u"* ]] || return 1
   [[ "$transcript" == *"Enter (N)"* ]] || return 1
   [[ "$transcript" == *"Root SSH оставлен без изменений"* ]] || return 1
   [[ "$calls" == 3 ]]
+)
+test_ssh_login_target_uses_ssh_connection_and_sudo_user() (
+  SSH_CONNECTION='198.51.100.9 55012 203.0.113.42 22'
+  SSH_CLIENT='198.51.100.9 55012 10.0.0.5'
+  SUDO_USER='deploy'
+  id() { [[ "${1:-}" == deploy ]]; }
+  ask() { echo "Unexpected prompt: $1" >&2; return 1; }
+  ssh_prepare_login_target || return 1
+  eq "$SSH_LOGIN_TARGET" "deploy@203.0.113.42"
+)
+
+test_ssh_login_target_unique_sudo_member() (
+  SSH_CONNECTION='198.51.100.9 55012 203.0.113.42 22'
+  SUDO_USER='root'
+  getent() { printf 'sudo:x:27:admins\n'; }
+  id() { [[ "${1:-}" == admins ]]; }
+  ask() { echo "Unexpected prompt: $1" >&2; return 1; }
+  ssh_prepare_login_target || return 1
+  eq "$SSH_LOGIN_TARGET" "admins@203.0.113.42"
+)
+
+test_ssh_login_target_ipv6() (
+  SSH_CONNECTION='2001:db8::99 44422 2001:db8::5 22'
+  SUDO_USER='deploy'
+  id() { [[ "${1:-}" == deploy ]]; }
+  ask() { echo "Unexpected prompt" >&2; return 1; }
+  ssh_prepare_login_target || return 1
+  eq "$SSH_LOGIN_TARGET" "deploy@2001:db8::5"
+)
+
+test_ssh_login_target_missing_context_prompts() (
+  SSH_CONNECTION=''
+  SSH_CLIENT=''
+  SUDO_USER='root'
+  getent() { printf "sudo:x:27:admins,operator\n"; }
+  id() { [[ "${1:-}" == admins || "${1:-}" == operator ]]; }
+  ask() {
+    case "$1" in
+      *"пользователя"*) REPLY=admins;;
+      *"Адрес сервера"*) REPLY=ssh.example.org;;
+      *) echo "Unexpected prompt: $1" >&2; return 1;;
+    esac
+  }
+  ssh_prepare_login_target || return 1
+  eq "$SSH_LOGIN_TARGET" "admins@ssh.example.org"
+)
+
+test_ssh_login_target_rejects_unsafe_hostname() (
+  SSH_CONNECTION=''
+  SSH_CLIENT=''
+  SUDO_USER='deploy'
+  id() { [[ "${1:-}" == deploy ]]; }
+  ask() { REPLY='example.org;touch /tmp/injected'; }
+  if ssh_prepare_login_target >/dev/null 2>&1; then return 1; fi
+  [[ -z "${SSH_LOGIN_TARGET:-}" ]]
 )
 test_ssh_rollback_contract() {
   grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
