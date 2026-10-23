@@ -270,6 +270,128 @@ ssh_apply() {
   fi
 }
 
+# /etc/ssh/sshd_config is the source of truth for requested global AllowUsers.
+ssh_allowusers_config_path() { printf '%s\n' /etc/ssh/sshd_config; }
+
+ssh_allowusers_apply() {
+  local username="$1" cfg staged saved unit rollback status_effective
+  local service_active=0 socket_active=0
+  cfg="$(ssh_allowusers_config_path)"
+  if [[ ! -f "$cfg" ]]; then
+    fail "Отсутствует SSH-конфигурация $cfg"
+    return 1
+  fi
+  if [[ ! "$username" =~ ^[a-z_][a-z0-9_-]{0,31}$ || "$username" == root ]]; then
+    fail 'Некорректное имя пользователя для AllowUsers'
+    return 1
+  fi
+  staged="$(mktemp "$(dirname "$cfg")/.srv-settings-sshd.XXXXXXXX")" || return 1
+  if ! cp -p -- "$cfg" "$staged" ||
+     ! python3 "$BASE_DIR/lib/ssh_allowusers.py" "$cfg" "$staged" "$username"; then
+    rm -f -- "$staged"
+    fail 'Не удалось подготовить изменение AllowUsers.'
+    return 1
+  fi
+  if cmp -s -- "$cfg" "$staged"; then
+    rm -f -- "$staged"
+    info "Пользователь $username уже присутствует в глобальном AllowUsers."
+    return 0
+  fi
+
+  if ! /usr/sbin/sshd -t -f "$staged"; then
+    rm -f -- "$staged"
+    fail 'sshd отклонил подготовленную конфигурацию; оригинал не изменён.'
+    return 1
+  fi
+  if ! status_effective="$(/usr/sbin/sshd -T -f "$staged" -C "user=$username,host=localhost,addr=127.0.0.1")"; then
+    rm -f -- "$staged"
+    fail 'Не удалось проверить AllowUsers через sshd -T.'
+    return 1
+  fi
+  if ! awk -v user="$username" '
+    $1 == "allowusers" {
+      for (i=2; i<=NF; i++) if ($i == user) found=1
+    }
+    END {exit !found}
+  ' <<< "$status_effective"; then
+    rm -f -- "$staged"
+    fail "В эффективном AllowUsers отсутствует $username; оригинал не изменён."
+    return 1
+  fi
+  systemctl is-active --quiet ssh.service && service_active=1
+  systemctl is-active --quiet ssh.socket && socket_active=1
+  if (( ! service_active && ! socket_active )); then
+    rm -f -- "$staged"
+    fail 'ssh.service и ssh.socket не активны; ограничение доступа не применено.'
+    return 1
+  fi
+
+  install -d -m 0700 /var/backups/srv-settings || { rm -f -- "$staged"; return 1; }
+  saved="$(mktemp -d /var/backups/srv-settings/ssh-allowusers-XXXXXXXX)" || {
+    rm -f -- "$staged"; return 1
+  }
+  if ! cp -a -- "$cfg" "$saved/original"; then
+    rm -f -- "$staged"
+    return 1
+  fi
+  rollback="$saved/rollback.sh"
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'set -eu'
+    printf 'cp -a -- %q %q\n' "$saved/original" "$cfg"
+    echo '/usr/sbin/sshd -t'
+    (( ! service_active )) || echo 'systemctl reload ssh.service || systemctl restart ssh.service'
+  } > "$rollback"
+  chmod 0700 "$rollback" || { rm -f -- "$staged"; return 1; }
+
+  unit="srv-settings-allowusers-$"
+  if ! systemd-run --quiet --unit="$unit" --on-active=5min /bin/bash "$rollback"; then
+    rm -f -- "$staged"
+    fail 'Не удалось назначить автоматический откат: AllowUsers не изменён.'
+    return 1
+  fi
+
+  if ! mv -f -- "$staged" "$cfg" || ! /usr/sbin/sshd -t ||
+     { (( service_active )) && ! systemctl reload ssh.service; }; then
+    warn 'Не удалось применить AllowUsers. Восстанавливаю прежний SSH-конфиг.'
+    bash "$rollback" || warn "Аварийный откат: sudo bash $rollback"
+    systemctl stop "$unit.timer" || true
+    return 1
+  fi
+
+  info "AllowUsers $username записано в $cfg."
+  warn 'Откройте НОВОЕ SSH-подключение во втором терминале и проверьте sudo id -u (ожидается 0).'
+  warn 'Если вход не работает, НЕ закрывайте текущую сессию. Автооткат через 5 минут.'
+  if confirm "Подтверждаете НОВЫЙ успешный SSH-вход $username с sudo (вывод 0)? (y отменяет откат)"; then
+    if systemctl stop "$unit.timer"; then
+      info 'AllowUsers подтверждён; автоматический откат отменён.'
+    else
+      warn "Не удалось отменить таймер $unit.timer: проверьте его вручную."
+      return 1
+    fi
+  else
+    warn 'Подтверждение не получено: восстанавливаю прежнюю конфигурацию.'
+    bash "$rollback" || warn "Аварийный откат: sudo bash $rollback"
+    systemctl stop "$unit.timer" || true
+  fi
+}
+
+ssh_allow_user_after_creation() {
+  local username="$1" port
+  port="$(ssh_ports | head -n 1)"
+  port="${port:-22}"
+  warn 'AllowUsers ограничит SSH-вход только перечисленными пользователями, включая нового.'
+  warn 'Если до сих пор не было AllowUsers, root и другие учётные записи потеряют возможность нового SSH-входа.'
+  info "Сначала откройте другой SSH-терминал как $username на текущем порту $port."
+  info "В новом сеансе запустите: whoami; sudo -v && sudo id -u (должно вывести 0)."
+  confirm "Добавить $username в глобальный AllowUsers (/etc/ssh/sshd_config)?" || return 0
+  confirm "Уже проверили вход $username в ОТДЕЛЬНОМ SSH-сеансе и sudo (0)?" || {
+    warn 'AllowUsers не изменён до проверки входа.'
+    return 0
+  }
+  ssh_allowusers_apply "$username"
+}
+
 ssh_menu() {
   local n
   while true; do

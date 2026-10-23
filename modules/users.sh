@@ -16,6 +16,7 @@ user_create() {
   info "Сейчас задайте пароль пользователю $username; ввод не отображается и не логируется"
   passwd "$username" || return 1
   warn "Проверьте вход в SSH под $username до отключения root!"
+  ssh_allow_user_after_creation "$username" || return 1
 }
 
 sudo_nopasswd() {

@@ -211,6 +211,44 @@ test_docker_conflicting_packages_require_separate_approval() (
   [[ "$prompts" == 2 && ! -e "$logfile" ]]
 )
 
+test_user_create_offers_safe_allowusers_after_password() (
+  local logfile
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  ask() { REPLY=admins; }
+  id() { return 1; }
+  adduser() { printf "create %s\n" "$*" >> "$logfile"; }
+  usermod() { printf "sudo %s\n" "$*" >> "$logfile"; }
+  passwd() { printf "password %s\n" "$*" >> "$logfile"; }
+  ssh_allow_user_after_creation() { printf "allowusers %s\n" "$*" >> "$logfile"; }
+  user_create || return 1
+  grep -Fxq "password admins" "$logfile" || return 1
+  grep -Fxq "allowusers admins" "$logfile" || return 1
+  local p a
+  p="$(grep -n "password admins" "$logfile" | cut -d: -f1)"
+  a="$(grep -n "allowusers admins" "$logfile" | cut -d: -f1)"
+  (( p < a ))
+)
+
+test_allowusers_declined_never_changes_ssh() (
+  confirm() { return 1; }
+  ssh_allowusers_apply() { echo "UNEXPECTED APPLY" >&2; return 1; }
+  ssh_allow_user_after_creation admins
+)
+
+test_allowusers_requires_verified_second_session() (
+  local replies=0
+  confirm() { ((replies+=1)); [[ "$replies" == 1 ]]; }
+  ssh_allowusers_apply() { echo "UNEXPECTED APPLY" >&2; return 1; }
+  ssh_allow_user_after_creation admins || return 1
+  [[ "$replies" == 2 ]]
+)
+
+test_allowusers_uses_main_config_not_sshd_dropin() {
+  grep -Fq "/etc/ssh/sshd_config" "$BASE_DIR/modules/ssh.sh" &&
+  grep -Fq "ssh_allowusers.py" "$BASE_DIR/modules/ssh.sh" &&
+  grep -Fq -- "--on-active=5min" "$BASE_DIR/modules/ssh.sh"
+}
 test_ubuntu_release_support() {
   local ver
   for ver in 22.04 24.04 26.04; do
