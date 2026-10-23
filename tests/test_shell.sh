@@ -279,6 +279,38 @@ test_ssh_auth_accepts_plain_yes_from_read() (
 test_ssh_status_shows_service_and_socket() {
   grep -Fq "systemctl status ssh.service ssh.socket" "$BASE_DIR/modules/ssh.sh"
 }
+# CRLF/pasted input is visually "y" but used to silently decline root SSH changes.
+test_confirm_accepts_yes_from_crlf() (
+  printf 'y\r\n' | confirm 'Подтвердить отключение root?' >/dev/null
+)
+
+test_confirm_accepts_yes_with_spaces() (
+  printf '  YES  \r\n' | confirm 'Подтвердить?' >/dev/null
+)
+
+test_confirm_negative_answers_remain_safe() (
+  local value
+  for value in '' 'n' 'N' 'no' 'nope' 'yesplease' 'y?'; do
+    if printf '%s\n' "$value" | confirm 'Подтвердить?' >/dev/null 2>&1; then
+      printf 'Unexpectedly accepted affirmative: %q\n' "$value" >&2
+      return 1
+    fi
+  done
+)
+
+test_ssh_root_confirmation_crlf_changes_preview_only() (
+  packages() { return 0; }
+  ssh_ports() { echo 22; }
+  ask_port() { PORT=2203; }
+  ask() { REPLY=yes; }
+  ssh_prepare_login_target() { SSH_LOGIN_TARGET='admins@203.0.113.42'; }
+  ufw() { echo 'Unexpected UFW changes!' >&2; return 1; }
+  local transcript
+  transcript="$(printf 'y\r\ny\r\nn\n' | ssh_apply 2>&1)" || return 1
+  [[ "$transcript" == *'PermitRootLogin=no'* ]] || return 1
+  [[ "$transcript" != *'Root SSH оставлен без изменений'* ]]
+)
+
 test_ssh_root_lockout_prompt_explains_safe_check() (
   local calls=0 transcript transcript_file
   transcript_file="$(mktemp)"

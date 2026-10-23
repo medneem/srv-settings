@@ -15,7 +15,15 @@ ubuntu_release_supported() {
 confirm() {
   local a
   read -r -p "$1 [y/N]: " a || return 1
-  [[ $a == [yY] || $a == [yY][eE][sS] || $a == [дД] || $a == [дД][аА] ]]
+  # Terminals/pasted responses may include CRLF or surrounding whitespace.
+  # Only an explicit yes may authorize potentially dangerous operations.
+  a="${a#"${a%%[![:space:]]*}"}"
+  a="${a%"${a##*[![:space:]]}"}"
+  case "$a" in
+    [yY]|[yY][eE][sS]|[дД]|[дД][аА]) return 0 ;;
+    ''|[nN]|[nN][oO]|[нН]|[нН][еЕ][тТ]) return 1 ;;
+    *) warn 'Ответ не распознан; действие НЕ подтверждено. Используйте y/yes или Enter (N).'; return 1 ;;
+  esac
 }
 
 ask() {
