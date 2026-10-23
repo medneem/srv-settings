@@ -279,6 +279,21 @@ test_ssh_auth_accepts_plain_yes_from_read() (
 test_ssh_status_shows_service_and_socket() {
   grep -Fq "systemctl status ssh.service ssh.socket" "$BASE_DIR/modules/ssh.sh"
 }
+test_ssh_root_lockout_prompt_explains_safe_check() (
+  local calls=0 transcript
+  packages() { return 0; }
+  ssh_ports() { printf '22\n'; }
+  ask_port() { PORT=2203; }
+  ask() { REPLY=yes; }
+  confirm() { ((calls+=1)); [[ "$calls" == 1 ]]; }
+  ufw() { echo "Unexpected UFW call" >&2; return 1; }
+  transcript="$(ssh_apply 2>&1)" || return 1
+  [[ "$transcript" == *"ssh -p 22 ИМЯ_ПОЛЬЗОВАТЕЛЯ@IP_СЕРВЕРА"* ]] || return 1
+  [[ "$transcript" == *"sudo -v && sudo id -u"* ]] || return 1
+  [[ "$transcript" == *"Enter (N)"* ]] || return 1
+  [[ "$transcript" == *"Root SSH оставлен без изменений"* ]] || return 1
+  [[ "$calls" == 3 ]]
+)
 test_ssh_rollback_contract() {
   grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
   grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh" || return 1
