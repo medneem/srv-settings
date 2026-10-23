@@ -357,7 +357,7 @@ ssh_allowusers_apply() {
   } > "$rollback"
   chmod 0700 "$rollback" || { rm -f -- "$staged"; return 1; }
 
-  unit="srv-settings-allowusers-$"
+  unit="srv-settings-allowusers-$$"
   if ! systemd-run --quiet --unit="$unit" --on-active=5min /bin/bash "$rollback"; then
     rm -f -- "$staged"
     fail 'Не удалось назначить автоматический откат: AllowUsers не изменён.'
