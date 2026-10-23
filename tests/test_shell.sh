@@ -455,11 +455,11 @@ test_fail2ban_wait_ready_times_out_without_false_success() (
 )
 
 test_fail2ban_setup_waits_for_ready_jail_without_double_start() (
-  local dir cfg calls=0 pauses=0
+  local dir fixture_cfg calls=0 pauses=0
   dir="$(mktemp -d)"
   trap 'rm -rf -- "$dir"' EXIT
-  cfg="$dir/90-srv-settings.local"
-  fail2ban_setup_path() { printf '%s\n' "$cfg"; }
+  fixture_cfg="$dir/90-srv-settings.local"
+  fail2ban_setup_path() { printf '%s\n' "$fixture_cfg"; }
   packages() { return 0; }
   backup() { return 0; }
   ssh_ports() { printf '2203\n'; }
@@ -485,16 +485,16 @@ test_fail2ban_setup_waits_for_ready_jail_without_double_start() (
   fail2ban_setup || return 1
   [[ "$calls" == 4 && "$pauses" == 2 ]] || return 1
   [[ "$(cat "$dir/systemctl.log")" == "$(printf 'enable fail2ban\nrestart fail2ban')" ]] || return 1
-  grep -Fxq 'port = 2203' "$cfg"
+  grep -Fxq 'port = 2203' "$fixture_cfg"
 )
 
 test_fail2ban_setup_failed_service_restores_previous_jail() (
-  local dir cfg status_checks=0
+  local dir fixture_cfg status_checks=0
   dir="$(mktemp -d)"
   trap 'rm -rf -- "$dir"' EXIT
-  cfg="$dir/90-srv-settings.local"
-  printf '%s\n' '# previous working configuration' > "$cfg"
-  fail2ban_setup_path() { printf '%s\n' "$cfg"; }
+  fixture_cfg="$dir/90-srv-settings.local"
+  printf '%s\n' '# previous working configuration' > "$fixture_cfg"
+  fail2ban_setup_path() { printf '%s\n' "$fixture_cfg"; }
   packages() { return 0; }
   backup() { return 0; }
   ssh_ports() { printf '22\n'; }
@@ -520,15 +520,15 @@ test_fail2ban_setup_failed_service_restores_previous_jail() (
     return 1
   fi
   [[ "$status_checks" -ge 2 ]] || return 1
-  grep -Fxq '# previous working configuration' "$cfg"
+  grep -Fxq '# previous working configuration' "$fixture_cfg"
 )
 
 test_fail2ban_setup_failure_on_first_install_removes_partial_jail() (
-  local dir cfg
+  local dir fixture_cfg
   dir="$(mktemp -d)"
   trap 'rm -rf -- "$dir"' EXIT
-  cfg="$dir/90-srv-settings.local"
-  fail2ban_setup_path() { printf '%s\n' "$cfg"; }
+  fixture_cfg="$dir/90-srv-settings.local"
+  fail2ban_setup_path() { printf '%s\n' "$fixture_cfg"; }
   packages() { return 0; }
   backup() { return 0; }
   ssh_ports() { printf '22\n'; }
@@ -546,7 +546,7 @@ test_fail2ban_setup_failure_on_first_install_removes_partial_jail() (
   sleep() { :; }
   confirm() { return 1; }
   if fail2ban_setup >/dev/null 2>&1; then return 1; fi
-  [[ ! -e "$cfg" ]]
+  [[ ! -e "$fixture_cfg" ]]
 )
 
 test_fail2ban_ignore_add_remove_and_rollback() (
