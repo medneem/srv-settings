@@ -70,6 +70,24 @@ test_ubuntu_release_support() {
   done
 }
 
+# Regression: passing a port via REPLY must not treat the word REPLY as a base-10 number.
+test_ask_port_accepts_2203() (
+  ask() { REPLY=2203; }
+  ask_port 'Новый SSH-порт' 22 || return 1
+  eq "$PORT" "2203"
+)
+
+test_ask_port_converts_leading_zeros() (
+  ask() { REPLY=02203; }
+  ask_port 'Новый SSH-порт' 22 || return 1
+  eq "$PORT" "2203"
+)
+
+test_ask_port_maximum() (
+  ask() { REPLY=65535; }
+  ask_port 'Новый SSH-порт' 22 || return 1
+  eq "$PORT" "65535"
+)
 test_port_bounds() {
   local x
   for x in 1 22 1024 65535 00022; do validate_port "$x" || return 1; done
