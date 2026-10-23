@@ -220,6 +220,7 @@ test_user_create_offers_safe_allowusers_after_password() (
   adduser() { printf "create %s\n" "$*" >> "$logfile"; }
   usermod() { printf "sudo %s\n" "$*" >> "$logfile"; }
   passwd() { printf "password %s\n" "$*" >> "$logfile"; }
+  sudo_nopasswd_for_user() { printf "nopasswd %s\n" "$*" >> "$logfile"; }
   ssh_allow_user_after_creation() { printf "allowusers %s\n" "$*" >> "$logfile"; }
   user_create || return 1
   grep -Fxq "password admins" "$logfile" || return 1
