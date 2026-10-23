@@ -133,7 +133,7 @@ fail2ban_menu() {
   local n
   while true; do
     printf '\nFAIL2BAN\n1. Установить и настроить SSH jail (3 попытки / 30 минут / бан 24 часа)\n2. Состояние Fail2ban\n3. Состояние SSH jail\n4. Разбанить IP\n5. Логи (последние 50 строк)\n6. Добавить IP/CIDR в исключения SSH (через запятую)\n7. Удалить IP/CIDR из исключений SSH\n8. Показать исключения SSH\n0. Назад\n'
-    read -r -p 'Выбор: ' n || return 0
+    read_input 'Выбор: ' n || return 0
     case $n in
       1) fail2ban_setup;;
       2) fail2ban-client status;;
