@@ -113,6 +113,36 @@ ssh_auth_mode_normalize() {
   esac
 }
 
+# Validate a fully captured sshd -T snapshot. Do not pipe sshd -T into
+# grep -q: with pipefail an early grep exit can cause SIGPIPE (status 141).
+ssh_validate_effective_config() {
+  local effective="$1" newport="$2" passwd_mode="$3" root_mode="$4"
+  local expected key observed mismatch=0
+  for expected in "port $newport" "passwordauthentication $passwd_mode" "permitrootlogin $root_mode"; do
+    if ! grep -Fxq -- "$expected" <<< "$effective"; then
+      key="${expected%% *}"
+      observed="$(awk -v key="$key" '$1==key {printf "%s%s", sep, $2; sep=","} END {print ""}' <<< "$effective")"
+      [[ -n "$observed" ]] || observed="(отсутствует)"
+      warn "sshd -T: ожидалось '$expected', фактически '$key $observed'."
+      mismatch=1
+    fi
+  done
+  return "$mismatch"
+}
+
+ssh_check_pending_config() {
+  local effective
+  if ! /usr/sbin/sshd -t; then
+    warn 'sshd -t обнаружил ошибку синтаксиса SSH-конфигурации (см. сообщение выше).'
+    return 1
+  fi
+  if ! effective="$(/usr/sbin/sshd -T)"; then
+    warn 'Не удалось получить эффективную конфигурацию через sshd -T.'
+    return 1
+  fi
+  ssh_validate_effective_config "$effective" "$1" "$2" "$3"
+}
+
 ssh_apply() {
   packages openssh-server ufw || return 1
   local oldport newport passwd_mode root_mode cfg save_dir rollback unit
@@ -195,11 +225,8 @@ ssh_apply() {
     "$newport" "$root_mode" "$passwd_mode" > "$cfg"
   chmod 0644 "$cfg"
 
-  if ! /usr/sbin/sshd -t ||
-     ! /usr/sbin/sshd -T | grep -qx "port $newport" ||
-     ! /usr/sbin/sshd -T | grep -qx "passwordauthentication $passwd_mode" ||
-     ! /usr/sbin/sshd -T | grep -qx "permitrootlogin $root_mode"; then
-    warn 'Проверка sshd не прошла, выполняем откат'
+  if ! ssh_check_pending_config "$newport" "$passwd_mode" "$root_mode"; then
+    warn 'Проверка SSH не прошла: значения не применились или конфигурация некорректна. Выполняем откат.'
     bash "$rollback" || warn "Ручное восстановление: bash $rollback"
     systemctl stop "$unit.timer" || true
     return 1
