@@ -280,14 +280,17 @@ test_ssh_status_shows_service_and_socket() {
   grep -Fq "systemctl status ssh.service ssh.socket" "$BASE_DIR/modules/ssh.sh"
 }
 test_ssh_root_lockout_prompt_explains_safe_check() (
-  local calls=0 transcript
+  local calls=0 transcript transcript_file
+  transcript_file="$(mktemp)"
+  trap 'rm -f "$transcript_file"' EXIT
   packages() { return 0; }
   ssh_ports() { printf '22\n'; }
   ask_port() { PORT=2203; }
   ask() { REPLY=yes; }
   confirm() { ((calls+=1)); [[ "$calls" == 1 ]]; }
   ufw() { echo "Unexpected UFW call" >&2; return 1; }
-  transcript="$(ssh_apply 2>&1)" || return 1
+  ssh_apply >"$transcript_file" 2>&1 || return 1
+  transcript="$(cat "$transcript_file")"
   [[ "$transcript" == *"ssh -p 22 ИМЯ_ПОЛЬЗОВАТЕЛЯ@IP_СЕРВЕРА"* ]] || return 1
   [[ "$transcript" == *"sudo -v && sudo id -u"* ]] || return 1
   [[ "$transcript" == *"Enter (N)"* ]] || return 1
