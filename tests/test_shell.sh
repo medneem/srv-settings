@@ -240,9 +240,9 @@ test_bootstrap_interactivity_contract() {
 test_ssh_auth_accepts_yes_with_crlf() (
   local confirmations=0
   packages() { return 0; }
-  ssh_ports() { printf '22\\n'; }
+  ssh_ports() { echo 22; }
   ask_port() { PORT=2203; }
-  ask() { REPLY="$(printf '  YES\\015')"; }
+  ask() { REPLY="$(printf '  YES\015')"; }
   confirm() { ((confirmations+=1)); return 1; }
   ufw() { echo 'Unexpected UFW action' >&2; return 1; }
   ssh_apply >/dev/null 2>&1 || return 1
@@ -252,9 +252,9 @@ test_ssh_auth_accepts_yes_with_crlf() (
 test_ssh_auth_accepts_no_with_whitespace() (
   local confirmations=0
   packages() { return 0; }
-  ssh_ports() { printf '22\\n'; }
+  ssh_ports() { echo 22; }
   ask_port() { PORT=2203; }
-  ask() { REPLY="$(printf 'No \\011')"; }
+  ask() { REPLY="$(printf 'No \011')"; }
   confirm() { ((confirmations+=1)); return 1; }
   ufw() { echo 'Unexpected UFW action' >&2; return 1; }
   ssh_apply >/dev/null 2>&1 || return 1
