@@ -124,7 +124,7 @@ ssh_menu() {
     read -r -p 'Выбор: ' n || return 0
     case $n in
       1) ssh_apply;;
-      2) /usr/sbin/sshd -T 2>/dev/null | grep -E '^(port|passwordauthentication|permitrootlogin|allowusers) '; systemctl status ssh.socket --no-pager -l || true;;
+      2) /usr/sbin/sshd -T 2>/dev/null | grep -E '^(port|passwordauthentication|permitrootlogin|allowusers) '; systemctl status ssh.service ssh.socket --no-pager -l || true;;
       0) return 0;;
       *) warn 'Неизвестный пункт';;
     esac
