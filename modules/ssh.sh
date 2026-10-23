@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 
+# Normalize user input from SSH terminals, including pasted CRLF/whitespace.
+ssh_auth_mode_normalize() {
+  local mode="${1,,}"
+  mode="${mode#"${mode%%[![:space:]]*}"}"
+  mode="${mode%"${mode##*[![:space:]]}"}"
+  case "$mode" in
+    yes|no) printf '%s\n' "$mode" ;;
+    *) return 1 ;;
+  esac
+}
+
 ssh_apply() {
   packages openssh-server ufw || return 1
   local oldport newport passwd_mode root_mode cfg save_dir rollback unit
@@ -12,8 +23,10 @@ ssh_apply() {
   current_pass="$(/usr/sbin/sshd -T 2>/dev/null | awk '$1=="passwordauthentication"{print $2;exit}')"
   current_root="$(/usr/sbin/sshd -T 2>/dev/null | awk '$1=="permitrootlogin"{print $2;exit}')"
   ask 'PasswordAuthentication (yes/no)' "${current_pass:-yes}" || return 1
-  passwd_mode="$REPLY"
-  if [[ $passwd_mode != yes && $passwd_mode != no ]]; then fail 'Укажите yes или no'; return 1; fi
+  if ! passwd_mode="$(ssh_auth_mode_normalize "$REPLY")"; then
+    fail 'Укажите yes или no'
+    return 1
+  fi
   root_mode="${current_root:-prohibit-password}"
   if confirm 'Отключить SSH-вход root (PermitRootLogin no)?'; then
     if confirm 'Я уже ПРОВЕРИЛ вход другого пользователя с sudo в отдельном SSH-сеансе'; then
@@ -111,7 +124,7 @@ ssh_menu() {
     read -r -p 'Выбор: ' n || return 0
     case $n in
       1) ssh_apply;;
-      2) /usr/sbin/sshd -T 2>/dev/null | grep -E '^(port|passwordauthentication|permitrootlogin|allowusers) '; systemctl status ssh.socket --no-pager -l || true;;
+      2) /usr/sbin/sshd -T 2>/dev/null | grep -E '^(port|passwordauthentication|permitrootlogin|allowusers) '; systemctl status ssh.service ssh.socket --no-pager -l || true;;
       0) return 0;;
       *) warn 'Неизвестный пункт';;
     esac
