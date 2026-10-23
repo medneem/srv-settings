@@ -415,9 +415,11 @@ test_ssh_auth_accepts_no_with_whitespace() (
   (( confirmations >= 2 ))
 )
 
-test_bootstrap_bypasses_main_archive_cache() {
-  grep -Fq 'main.tar.gz?cache_bust=' "$BASE_DIR/bootstrap.sh" || return 1
-  grep -Fq "Cache-Control: no-cache" "$BASE_DIR/bootstrap.sh" || return 1
+test_bootstrap_resolves_commit_before_downloading() {
+  grep -Fq 'api.github.com/repos/medneem/srv-settings/commits/main?cache_bust=' "$BASE_DIR/bootstrap.sh" || return 1
+  grep -Fq 'codeload.github.com/medneem/srv-settings/tar.gz/' "$BASE_DIR/bootstrap.sh" || return 1
+  grep -Fq -- '--strip-components=1' "$BASE_DIR/bootstrap.sh" || return 1
+  grep -Fq 'Cache-Control: no-cache' "$BASE_DIR/bootstrap.sh"
 }
 test_ssh_auth_accepts_plain_yes_from_read() (
   local confirmations=0
@@ -516,32 +518,59 @@ test_ssh_login_target_ipv6() (
   eq "$SSH_LOGIN_TARGET" "deploy@2001:db8::5"
 )
 
-test_ssh_login_target_missing_context_prompts() (
-  SSH_CONNECTION=''
-  SSH_CLIENT=''
-  SUDO_USER='root'
-  getent() { printf "sudo:x:27:admins,operator\n"; }
-  id() { [[ "${1:-}" == admins || "${1:-}" == operator ]]; }
+test_ssh_login_target_missing_address_never_prompts() (
+  SSH_CONNECTION=""
+  SSH_CLIENT=""
+  SUDO_USER="deploy"
+  id() { [[ "$1" == deploy ]]; }
+  ip() { return 1; }
+  ask() { echo "Unexpected interactive prompt" >&2; return 1; }
+  if ssh_prepare_login_target >/dev/null 2>&1; then return 1; fi
+  [[ -z "$SSH_LOGIN_TARGET" ]]
+)
+
+test_ssh_root_no_detectable_address_keeps_explicit_confirmation() (
+  local num=0 out
+  packages() { return 0; }
+  ssh_ports() { echo 22; }
+  ask_port() { PORT=2203; }
+  ask() { REPLY=yes; }
+  ssh_prepare_login_target() { SSH_LOGIN_TARGET=""; return 1; }
+  confirm() { ((num+=1)); [[ "$num" == 1 || "$num" == 2 ]]; }
+  ufw() { echo "Unexpected UFW call" >&2; return 1; }
+  out="$(mktemp)"
+  ssh_apply >"$out" 2>&1 || { rm -f "$out"; return 1; }
+  grep -Fq "PermitRootLogin=no" "$out" || { rm -f "$out"; return 1; }
+  rm -f "$out"
+  [[ "$num" == 3 ]]
+)
+
+test_ssh_password_auth_reprompts_invalid_input() (
+  local reads=0 confirms=0
+  packages() { return 0; }
+  ssh_ports() { echo 22; }
+  ask_port() { PORT=2203; }
   ask() {
-    case "$1" in
-      *"пользователя"*) REPLY=admins;;
-      *"Адрес сервера"*) REPLY=ssh.example.org;;
-      *) echo "Unexpected prompt: $1" >&2; return 1;;
-    esac
+    ((reads+=1))
+    if ((reads==1)); then REPLY="yes-no"; else REPLY="yes"; fi
   }
-  ssh_prepare_login_target || return 1
-  eq "$SSH_LOGIN_TARGET" "admins@ssh.example.org"
+  confirm() { ((confirms+=1)); return 1; }
+  ufw() { echo "Unexpected UFW call" >&2; return 1; }
+  ssh_apply >/dev/null 2>&1 || return 1
+  [[ "$reads" == 2 && "$confirms" == 2 ]]
 )
 
 test_ssh_login_target_rejects_unsafe_hostname() (
-  SSH_CONNECTION=''
-  SSH_CLIENT=''
-  SUDO_USER='deploy'
-  id() { [[ "${1:-}" == deploy ]]; }
-  ask() { REPLY='example.org;touch /tmp/injected'; }
+  SSH_CONNECTION=""
+  SSH_CLIENT=""
+  SUDO_USER="deploy"
+  id() { [[ "$1" == deploy ]]; }
+  ip() { return 1; }
+  ask() { echo "Unexpected interactive prompt" >&2; return 1; }
   if ssh_prepare_login_target >/dev/null 2>&1; then return 1; fi
-  [[ -z "${SSH_LOGIN_TARGET:-}" ]]
+  [[ -z "$SSH_LOGIN_TARGET" ]]
 )
+
 test_ssh_rollback_contract() {
   grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
   grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh" || return 1
