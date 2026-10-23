@@ -12,9 +12,39 @@ ubuntu_release_supported() {
   esac
 }
 
+# UTF-8 Readline editing erases full characters (not individual bytes).
+# Readline only works with a TTY; keep normal read for pipes and unit tests.
+read_input() {
+  local prompt="$1" variable="$2"
+  if [[ -t 0 ]]; then
+    read -e -r -p "$prompt" "$variable"
+  else
+    read -r -p "$prompt" "$variable"
+  fi
+}
+
+# Do not permanently change system locale. Only adjust this process/TTY.
+prepare_utf8_terminal() {
+  local charmap
+  charmap="$(locale charmap 2>/dev/null || true)"
+  case "$charmap" in
+    UTF-8|utf8|UTF8) ;;
+    *)
+      if [[ "$(LC_ALL=C.UTF-8 locale charmap 2>/dev/null)" == UTF-8 ]]; then
+        export LC_ALL=C.UTF-8
+      else
+        warn 'Нет доступной UTF-8 locale. Стирание кириллицы может работать некорректно.'
+      fi
+      ;;
+  esac
+  if [[ -t 0 ]] && command -v stty >/dev/null 2>&1; then
+    stty iutf8 2>/dev/null || true
+  fi
+}
+
 confirm() {
   local a
-  read -r -p "$1 [y/N]: " a || return 1
+  read_input "$1 [y/N]: " a || return 1
   # Terminals/pasted responses may include CRLF or surrounding whitespace.
   # Only an explicit yes may authorize potentially dangerous operations.
   a="${a#"${a%%[![:space:]]*}"}"
@@ -28,7 +58,7 @@ confirm() {
 
 ask() {
   local q="$1" default="${2:-}" value
-  read -r -p "$q [$default]: " value || return 1
+  read_input "$q [$default]: " value || return 1
   REPLY="${value:-$default}"
 }
 

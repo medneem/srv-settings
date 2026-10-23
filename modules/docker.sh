@@ -174,7 +174,7 @@ docker_menu() {
   local n
   while true; do
     printf '\nDOCKER (необязательно)\n1. Установить Docker Engine + Compose (официальный APT)\n2. Настроить зеркала Docker Hub\n3. Проверить состояние Docker\n4. Показать daemon.json\n0. Назад\n'
-    read -r -p 'Выбор: ' n || return 0
+    read_input 'Выбор: ' n || return 0
     case "$n" in
       1) docker_install;;
       2) docker_mirrors;;
@@ -190,7 +190,7 @@ additional_menu() {
   local n
   while true; do
     printf '\nДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ\n1. Docker (необязательно)\n0. Назад\n'
-    read -r -p 'Выбор: ' n || return 0
+    read_input 'Выбор: ' n || return 0
     case "$n" in
       1) docker_menu;;
       0) return 0;;

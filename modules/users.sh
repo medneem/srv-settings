@@ -46,7 +46,7 @@ users_menu() {
   local n
   while true; do
     printf '\nПОЛЬЗОВАТЕЛИ\n1. Создать пользователя / обновить пароль, дать sudo\n2. NOPASSWD (опасная опция)\n0. Назад\n'
-    read -r -p 'Выбор: ' n || return 0
+    read_input 'Выбор: ' n || return 0
     case $n in
       1) user_create;;
       2) sudo_nopasswd;;

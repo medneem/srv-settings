@@ -13,6 +13,7 @@ if [[ ! -r /etc/os-release ]]; then echo 'Нет /etc/os-release' >&2; exit 1; f
 if [[ ${ID:-} != ubuntu ]]; then echo 'Требуется Ubuntu Server' >&2; exit 1; fi
 
 source "$BASE_DIR/modules/common.sh"
+prepare_utf8_terminal
 source "$BASE_DIR/modules/system.sh"
 source "$BASE_DIR/modules/users.sh"
 source "$BASE_DIR/modules/ssh.sh"
@@ -43,7 +44,7 @@ main_menu() {
     printf '8. Дополнительные настройки\n'
     printf '0. Выход\n'
     printf '=====================================\n'
-    read -r -p 'Выбор: ' choice || { printf '\n'; return 0; }
+    read_input 'Выбор: ' choice || { printf '\n'; return 0; }
     case "$choice" in
       1) full_setup || warn 'Настройка остановлена из-за ошибки';;
       2) ufw_menu;;

@@ -22,7 +22,7 @@ system_menu() {
   local n
   while true; do
     printf '\nСИСТЕМА\n1. Установить базовые пакеты и настроить время\n2. apt update && apt upgrade\n0. Назад\n'
-    read -r -p 'Выбор: ' n || return 0
+    read_input 'Выбор: ' n || return 0
     case $n in
       1) system_setup;;
       2) if confirm 'Обновить пакеты?'; then apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y; fi;;
