@@ -571,6 +571,37 @@ test_ssh_login_target_rejects_unsafe_hostname() (
   [[ -z "$SSH_LOGIN_TARGET" ]]
 )
 
+test_ssh_effective_settings_valid_large_output() (
+  local effective
+  effective="$(printf 'port 2203\npasswordauthentication yes\npermitrootlogin no\n'; awk 'BEGIN { for(i=0;i<10000;i++) print "unusedkey test" }')" || return 1
+  ssh_validate_effective_config "$effective" 2203 yes no
+)
+
+test_ssh_effective_settings_reports_mismatch() (
+  local output logfile
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  output="$(printf 'port 22\npasswordauthentication yes\npermitrootlogin yes\n')"
+  if ssh_validate_effective_config "$output" 2203 yes no 2>"$logfile"; then
+    echo 'sshd effective settings mismatch accepted!' >&2
+    return 1
+  fi
+  grep -Fq 'port' "$logfile" || return 1
+  grep -Fq '22' "$logfile" || return 1
+  grep -Fq '2203' "$logfile" || return 1
+  grep -Fq 'permitrootlogin' "$logfile" || return 1
+  grep -Fq 'yes' "$logfile"
+)
+
+test_ssh_effective_settings_never_greps_live_pipe() {
+  local ssh="$BASE_DIR/modules/ssh.sh"
+  if grep -Fq 'sshd -T | grep -q' "$ssh"; then
+    echo 'SIGPIPE-prone sshd -T | grep -q still exists' >&2
+    return 1
+  fi
+  grep -Fq 'ssh_validate_effective_config "$effective"' "$ssh"
+}
+
 test_ssh_rollback_contract() {
   grep -Fq -- '--on-active=5min' "$BASE_DIR/modules/ssh.sh" || return 1
   grep -Fq 'ufw allow "$newport/tcp"' "$BASE_DIR/modules/ssh.sh" || return 1
