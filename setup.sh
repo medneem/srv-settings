@@ -13,6 +13,7 @@ if [[ ! -r /etc/os-release ]]; then echo 'Нет /etc/os-release' >&2; exit 1; f
 if [[ ${ID:-} != ubuntu ]]; then echo 'Требуется Ubuntu Server' >&2; exit 1; fi
 
 source "$BASE_DIR/modules/common.sh"
+prepare_utf8_terminal
 source "$BASE_DIR/modules/system.sh"
 source "$BASE_DIR/modules/users.sh"
 source "$BASE_DIR/modules/ssh.sh"
