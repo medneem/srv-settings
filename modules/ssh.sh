@@ -42,6 +42,29 @@ ssh_current_server_address() {
   printf '%s\n' "$server"
 }
 
+# Best-effort fallback when sudo has stripped SSH_CONNECTION.
+# Only a single globally routable server address is safe to suggest.
+ssh_public_server_address() {
+  command -v ip >/dev/null 2>&1 || return 1
+  { ip -o -4 addr show scope global 2>/dev/null || true; } |
+    awk '$3 == "inet" {print $4}' |
+    python3 -c '
+import ipaddress
+import sys
+addresses = set()
+for item in sys.stdin:
+    try:
+        ip = ipaddress.ip_interface(item.strip()).ip
+    except ValueError:
+        continue
+    if ip.is_global:
+        addresses.add(str(ip))
+if len(addresses) != 1:
+    sys.exit(1)
+print(next(iter(addresses)))
+'
+}
+
 # Return a copy-ready target (user@server) in SSH_LOGIN_TARGET, or leave it blank.
 # Never guess if there is more than one possible login or no usable server address.
 ssh_prepare_login_target() {
@@ -49,34 +72,35 @@ ssh_prepare_login_target() {
   local name server
   name="$(ssh_sudo_login_candidate)" || name=""
   if [[ -z "$name" ]]; then
-    info "Не удалось однозначно определить пользователя с sudo."
-    ask 'Логин пользователя для проверки SSH' '' || return 1
-    name="$REPLY"
+    warn 'Не удалось однозначно определить пользователя с sudo. Команда подключения не будет подставлена автоматически.'
+    return 1
   fi
   if [[ ! "$name" =~ ^[a-z_][a-z0-9_-]*$ || "$name" == root ]] ||
      ! id "$name" >/dev/null 2>&1; then
-    warn 'Некорректный логин или пользователь не существует; вход root не будет отключён.'
+    warn 'Не удалось определить действительного пользователя для SSH.'
     return 1
   fi
+
   server="$(ssh_current_server_address)" || server=""
   if [[ -z "$server" ]]; then
-    info 'Не удалось получить адрес сервера из SSH_CONNECTION / SSH_CLIENT.'
-    ask 'Адрес сервера (IP или DNS, доступный с вашего компьютера)' '' || return 1
-    server="$REPLY"
+    server="$(ssh_public_server_address)" || server=""
+  fi
+  if [[ -z "$server" ]]; then
+    warn 'Адрес сервера не определён автоматически. Вводить его в мастере не требуется.'
+    return 1
   fi
   if [[ ! "$server" =~ ^[a-zA-Z0-9:][a-zA-Z0-9._:%-]*$ ]]; then
-    warn 'Некорректный адрес сервера; вход root не будет отключён.'
+    warn 'Обнаружен некорректный адрес сервера.'
     return 1
   fi
   case "$server" in
     0.0.0.0|::|::1|localhost|127.*)
-      warn 'Указан локальный/неподходящий адрес; вход root не будет отключён.'
+      warn 'Обнаружен локальный адрес сервера, который нельзя использовать для внешнего SSH.'
       return 1
       ;;
   esac
   SSH_LOGIN_TARGET="$name@$server"
 }
-
 
 # Normalize user input from SSH terminals, including pasted CRLF/whitespace.
 ssh_auth_mode_normalize() {
@@ -100,11 +124,13 @@ ssh_apply() {
   newport="$PORT"
   current_pass="$(/usr/sbin/sshd -T 2>/dev/null | awk '$1=="passwordauthentication"{print $2;exit}')"
   current_root="$(/usr/sbin/sshd -T 2>/dev/null | awk '$1=="permitrootlogin"{print $2;exit}')"
-  ask 'PasswordAuthentication (yes/no)' "${current_pass:-yes}" || return 1
-  if ! passwd_mode="$(ssh_auth_mode_normalize "$REPLY")"; then
-    fail 'Укажите yes или no'
-    return 1
-  fi
+  while true; do
+    ask 'PasswordAuthentication (yes/no)' "${current_pass:-yes}" || return 1
+    if passwd_mode="$(ssh_auth_mode_normalize "$REPLY")"; then
+      break
+    fi
+    warn "Укажите yes или no. Получено: $(printf '%q' "$REPLY"). Повторите ввод."
+  done
   root_mode="${current_root:-prohibit-password}"
   local login_target=''
   if confirm 'Отключить SSH-вход root (PermitRootLogin no)?'; then
@@ -114,17 +140,19 @@ ssh_apply() {
       login_target="$SSH_LOGIN_TARGET"
       info "2. Скопируйте команду ниже во ВТОРОЙ терминал (ТЕКУЩИЙ SSH-порт):"
       printf '\n    ssh -p %s %s\n\n' "$oldport" "$login_target"
-      info '   Адрес взят из текущего SSH-подключения; проверьте, что он доступен из вашего терминала.'
-      info '3. Выполните whoami — должно быть имя созданного пользователя, не root.'
-      info '4. Выполните: sudo -v && sudo id -u — после ввода пароля команда должна вывести 0.'
-      info 'Только после успешной проверки отвечайте y. Если не проверили — нажмите Enter (N).'
-      if confirm 'Уже вошли во ВТОРОМ SSH-сеансе под созданным пользователем и проверили sudo (вывод 0)?'; then
-        root_mode=no
-      else
-        warn 'Root SSH оставлен без изменений'
-      fi
+      info '   Убедитесь, что адрес сервера доступен с вашего компьютера (учтите NAT и доменные имена).'
     else
-      warn 'Не удалось составить команду проверки, вход root останется разрешённым.'
+      info '2. Подключитесь в другом терминале привычным способом на ТЕКУЩИЙ SSH-порт:'
+      printf '\n    ssh -p %s ПОЛЬЗОВАТЕЛЬ@АДРЕС_СЕРВЕРА\n\n' "$oldport"
+      warn 'Адрес сервера не запрашивается. Воспользуйтесь адресом, по которому вы обычно подключаетесь.'
+    fi
+    info '3. Выполните whoami — должно быть имя созданного пользователя, не root.'
+    info '4. Выполните: sudo -v && sudo id -u — после ввода пароля команда должна вывести 0.'
+    info 'Только после успешной проверки отвечайте y. Если не проверили — нажмите Enter (N).'
+    if confirm 'Уже вошли во ВТОРОМ SSH-сеансе под созданным пользователем и проверили sudo (вывод 0)?'; then
+      root_mode=no
+    else
+      warn 'Root SSH оставлен без изменений'
     fi
   fi
   warn "Новые настройки: port=$newport, PasswordAuthentication=$passwd_mode, PermitRootLogin=$root_mode"
