@@ -233,6 +233,18 @@ test_user_create_offers_safe_allowusers_after_password() (
 
 # The generated SSH command must be visible BEFORE the first AllowUsers prompt.
 # Use the newly created user, not an ambiguous sudo group candidate.
+test_ssh_login_port_prefers_active_ssh_connection() (
+  SSH_CONNECTION='198.51.100.7 53000 203.0.113.42 2203'
+  ssh_ports() { printf '22\n'; }
+  eq "$(ssh_current_login_port)" "2203"
+)
+
+test_ssh_login_port_falls_back_to_effective_config() (
+  SSH_CONNECTION=''
+  ssh_ports() { printf '2203\n'; }
+  eq "$(ssh_current_login_port)" "2203"
+)
+
 test_allowusers_shows_login_command_before_confirmation() (
   local transcript command_line prompt_line
   SSH_CONNECTION='198.51.100.7 53842 203.0.113.42 22'
