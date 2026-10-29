@@ -70,7 +70,10 @@ print(next(iter(addresses)))
 ssh_prepare_login_target() {
   SSH_LOGIN_TARGET=""
   local name server
-  name="$(ssh_sudo_login_candidate)" || name=""
+  name="${1:-}"
+  if [[ -z "$name" ]]; then
+    name="$(ssh_sudo_login_candidate)" || name=""
+  fi
   if [[ -z "$name" ]]; then
     warn 'Не удалось однозначно определить пользователя с sudo. Команда подключения не будет подставлена автоматически.'
     return 1
@@ -100,6 +103,18 @@ ssh_prepare_login_target() {
       ;;
   esac
   SSH_LOGIN_TARGET="$name@$server"
+}
+
+# Print an executable SSH command for the user just created, even when
+# multiple members of the sudo group make autodetection ambiguous.
+ssh_show_login_command() {
+  local username="$1" port="$2"
+  if ssh_prepare_login_target "$username"; then
+    printf '\n    ssh -p %s %s\n\n' "$port" "$SSH_LOGIN_TARGET"
+  else
+    printf '\n    ssh -p %s %s@АДРЕС_СЕРВЕРА\n\n' "$port" "$username"
+    warn 'Автоматически определить адрес сервера не удалось. Используйте адрес, по которому подключаетесь обычно.'
+  fi
 }
 
 # Normalize user input from SSH terminals, including pasted CRLF/whitespace.
@@ -166,7 +181,7 @@ ssh_apply() {
   if confirm 'Отключить SSH-вход root (PermitRootLogin no)?'; then
     warn 'После отключения root больше не сможет подключаться по SSH. Сначала проверьте другой способ входа!'
     info '1. НЕ закрывайте текущую SSH-сессию. Откройте ВТОРОЙ терминал на своём компьютере.'
-    if ssh_prepare_login_target; then
+    if ssh_prepare_login_target "${SRV_SETTINGS_CREATED_SUDO_USER:-}"; then
       login_target="$SSH_LOGIN_TARGET"
       info "2. Скопируйте команду ниже во ВТОРОЙ терминал (ТЕКУЩИЙ SSH-порт):"
       printf '\n    ssh -p %s %s\n\n' "$oldport" "$login_target"
@@ -287,7 +302,7 @@ ssh_allowusers_cancel_rollback() {
 }
 
 ssh_allowusers_apply() {
-  local username="$1" cfg staged saved unit rollback status_effective
+  local username="$1" cfg staged saved unit rollback status_effective port
   local service_active=0 socket_active=0
   cfg="$(ssh_allowusers_config_path)"
   if [[ ! -f "$cfg" ]]; then
@@ -373,7 +388,11 @@ ssh_allowusers_apply() {
   fi
 
   info "AllowUsers $username записано в $cfg."
-  warn 'Откройте НОВОЕ SSH-подключение во втором терминале и проверьте sudo id -u (ожидается 0).'
+  warn 'После применения AllowUsers повторно откройте НОВОЕ SSH-подключение во втором терминале:'
+  port="$(ssh_ports | head -n 1)"
+  port="${port:-22}"
+  ssh_show_login_command "$username" "$port"
+  info "В новом сеансе выполните: whoami; sudo id -u (ожидаются $username и 0)."
   warn 'Если вход не работает, НЕ закрывайте текущую сессию. Автооткат через 5 минут.'
   if confirm "Подтверждаете НОВЫЙ успешный SSH-вход $username с sudo (вывод 0)? (y отменяет откат)"; then
     if ssh_allowusers_cancel_rollback "$unit"; then
@@ -395,8 +414,14 @@ ssh_allow_user_after_creation() {
   port="${port:-22}"
   warn 'AllowUsers ограничит SSH-вход только перечисленными пользователями, включая нового.'
   warn 'Если до сих пор не было AllowUsers, root и другие учётные записи потеряют возможность нового SSH-входа.'
-  info "Сначала откройте другой SSH-терминал как $username на текущем порту $port."
-  info "В новом сеансе запустите: whoami; sudo -v && sudo id -u (должно вывести 0)."
+  info '1. НЕ закрывайте текущую SSH-сессию.'
+  info '2. Откройте ВТОРОЙ терминал на своём компьютере и выполните:'
+  ssh_show_login_command "$username" "$port"
+  info '   Если сервер использует NAT или перенаправление портов, подставьте внешний адрес/порт.'
+  info '3. После входа во втором терминале выполните:'
+  printf '\n    whoami\n    sudo id -u\n\n'
+  info "   Ожидается: $username и 0. При настроенном NOPASSWD пароль sudo не потребуется."
+  warn 'Если вход не работает, отвечайте N. Изменять AllowUsers пока нельзя.'
   confirm "Добавить $username в глобальный AllowUsers (/etc/ssh/sshd_config)?" || return 0
   confirm "Уже проверили вход $username в ОТДЕЛЬНОМ SSH-сеансе и sudo (0)?" || {
     warn 'AllowUsers не изменён до проверки входа.'
