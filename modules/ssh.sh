@@ -42,6 +42,22 @@ ssh_current_server_address() {
   printf '%s\n' "$server"
 }
 
+# Prefer the actual server-side port of the current SSH session.
+# With systemd ssh.socket the effective sshd -T port can differ from the listener.
+ssh_current_login_port() {
+  local client client_port server port
+  if [[ -n "${SSH_CONNECTION:-}" ]]; then
+    read -r client client_port server port <<< "$SSH_CONNECTION"
+    if validate_port "${port:-}"; then
+      printf '%d\n' "$((10#$port))"
+      return 0
+    fi
+  fi
+  port="$(ssh_ports | head -n 1)"
+  if ! validate_port "${port:-}"; then port=22; fi
+  printf '%d\n' "$((10#$port))"
+}
+
 # Best-effort fallback when sudo has stripped SSH_CONNECTION.
 # Only a single globally routable server address is safe to suggest.
 ssh_public_server_address() {
@@ -163,8 +179,7 @@ ssh_apply() {
   local oldport newport passwd_mode root_mode cfg save_dir rollback unit
   local socket_active=0 service_active=0 current_pass current_root
   cfg=/etc/ssh/sshd_config.d/00-00-srv-settings.conf
-  oldport="$(ssh_ports | head -n 1)"
-  oldport="${oldport:-22}"
+  oldport="$(ssh_current_login_port)"
   ask_port 'Новый SSH-порт' "$oldport" || return 1
   newport="$PORT"
   current_pass="$(/usr/sbin/sshd -T 2>/dev/null | awk '$1=="passwordauthentication"{print $2;exit}')"
@@ -192,7 +207,7 @@ ssh_apply() {
       warn 'Адрес сервера не запрашивается. Воспользуйтесь адресом, по которому вы обычно подключаетесь.'
     fi
     info '3. Выполните whoami — должно быть имя созданного пользователя, не root.'
-    info '4. Выполните: sudo -v && sudo id -u — после ввода пароля команда должна вывести 0.'
+    info '4. Выполните: sudo -v && sudo id -u — ожидается 0. При NOPASSWD пароль не требуется.'
     info 'Только после успешной проверки отвечайте y. Если не проверили — нажмите Enter (N).'
     if confirm 'Уже вошли во ВТОРОМ SSH-сеансе под созданным пользователем и проверили sudo (вывод 0)?'; then
       root_mode=no
@@ -389,8 +404,7 @@ ssh_allowusers_apply() {
 
   info "AllowUsers $username записано в $cfg."
   warn 'После применения AllowUsers повторно откройте НОВОЕ SSH-подключение во втором терминале:'
-  port="$(ssh_ports | head -n 1)"
-  port="${port:-22}"
+  port="$(ssh_current_login_port)"
   ssh_show_login_command "$username" "$port"
   info "В новом сеансе выполните: whoami; sudo id -u (ожидаются $username и 0)."
   warn 'Если вход не работает, НЕ закрывайте текущую сессию. Автооткат через 5 минут.'
@@ -410,8 +424,7 @@ ssh_allowusers_apply() {
 
 ssh_allow_user_after_creation() {
   local username="$1" port
-  port="$(ssh_ports | head -n 1)"
-  port="${port:-22}"
+  port="$(ssh_current_login_port)"
   warn 'AllowUsers ограничит SSH-вход только перечисленными пользователями, включая нового.'
   warn 'Если до сих пор не было AllowUsers, root и другие учётные записи потеряют возможность нового SSH-входа.'
   info '1. НЕ закрывайте текущую SSH-сессию.'
