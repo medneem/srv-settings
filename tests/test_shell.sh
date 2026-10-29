@@ -231,6 +231,58 @@ test_user_create_offers_safe_allowusers_after_password() (
   (( p < a ))
 )
 
+# The generated SSH command must be visible BEFORE the first AllowUsers prompt.
+# Use the newly created user, not an ambiguous sudo group candidate.
+test_ssh_login_port_prefers_active_ssh_connection() (
+  SSH_CONNECTION='198.51.100.7 53000 203.0.113.42 2203'
+  ssh_ports() { printf '22\n'; }
+  eq "$(ssh_current_login_port)" "2203"
+)
+
+test_ssh_login_port_falls_back_to_effective_config() (
+  SSH_CONNECTION=''
+  ssh_ports() { printf '2203\n'; }
+  eq "$(ssh_current_login_port)" "2203"
+)
+
+test_allowusers_shows_login_command_before_confirmation() (
+  local transcript command_line prompt_line
+  SSH_CONNECTION='198.51.100.7 53842 203.0.113.42 22'
+  SUDO_USER=root
+  ssh_ports() { printf '22\n'; }
+  id() { [[ "$1" == admins ]]; }
+  getent() { echo 'Unexpected sudo candidate lookup' >&2; return 1; }
+  confirm() { printf 'PROMPT: %s\n' "$1"; return 1; }
+  ssh_allowusers_apply() { echo 'Unexpected AllowUsers apply' >&2; return 1; }
+
+  transcript="$(ssh_allow_user_after_creation admins 2>&1)" || return 1
+  [[ "$transcript" == *'ssh -p 22 admins@203.0.113.42'* ]] || return 1
+  [[ "$transcript" == *'whoami'* && "$transcript" == *'sudo id -u'* ]] || return 1
+  command_line="$(grep -n -m1 -F 'ssh -p 22 admins@203.0.113.42' <<< "$transcript" | cut -d: -f1)"
+  prompt_line="$(grep -n -m1 -F 'PROMPT: Добавить admins' <<< "$transcript" | cut -d: -f1)"
+  [[ -n "$command_line" && -n "$prompt_line" && "$command_line" -lt "$prompt_line" ]]
+)
+
+test_allowusers_login_command_without_detectable_ip() (
+  local transcript
+  SSH_CONNECTION=''
+  SSH_CLIENT=''
+  SUDO_USER=root
+  ssh_ports() { printf '2203\n'; }
+  id() { [[ "$1" == admins ]]; }
+  ip() { return 1; }
+  confirm() { return 1; }
+  transcript="$(ssh_allow_user_after_creation admins 2>&1)" || return 1
+  [[ "$transcript" == *'ssh -p 2203 admins@АДРЕС_СЕРВЕРА'* ]] || return 1
+  [[ "$transcript" == *'sudo id -u'* ]]
+)
+
+# After AllowUsers takes effect, the new session must be tested again.
+test_allowusers_post_apply_instructions_include_login_command() {
+  sed -n '/^ssh_allowusers_apply() {/,/^}/p' "$BASE_DIR/modules/ssh.sh" |
+    grep -Fq 'ssh_show_login_command "$username" "$port"'
+}
+
 test_allowusers_declined_never_changes_ssh() (
   confirm() { return 1; }
   ssh_allowusers_apply() { echo "UNEXPECTED APPLY" >&2; return 1; }
