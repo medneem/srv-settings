@@ -18,7 +18,7 @@ user_create() {
   sudo_nopasswd_for_user "$username" || return 1
   # Reuse the verified newly created account in the following SSH setup step.
   SRV_SETTINGS_CREATED_SUDO_USER="$username"
-  warn "Проверьте вход в SSH под $username до отключения root!"
+  attention "Проверьте вход в SSH под $username до отключения root!"
   ssh_allow_user_after_creation "$username" || return 1
 }
 
@@ -38,7 +38,7 @@ sudo_nopasswd_for_user() {
     fail 'Недопустимое имя пользователя для NOPASSWD или пользователь отсутствует'
     return 1
   fi
-  warn "NOPASSWD разрешит $name выполнять любые команды от root через sudo БЕЗ пароля."
+  attention "NOPASSWD разрешит $name выполнять любые команды от root через sudo БЕЗ пароля."
   warn 'Это эквивалентно правам root; не рекомендуется для общедоступных учётных записей.'
   confirm "Отключить запрос пароля sudo ТОЛЬКО для $name?" || return 0
   path="$(sudo_nopasswd_path "$name")" || return 1
@@ -62,7 +62,7 @@ sudo_nopasswd_for_user() {
   fi
   backup "$path" || { rm -f -- "$staging"; return 1; }
   mv -f -- "$staging" "$path" || { rm -f -- "$staging"; return 1; }
-  info "NOPASSWD для $name сохранён в $path; перезагрузка сервера не требуется."
+  success "NOPASSWD для $name сохранён в $path; перезагрузка сервера не требуется."
   info "Проверка под $name: sudo -k; sudo -n id -u (ожидается 0 без запроса пароля)."
 }
 
