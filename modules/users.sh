@@ -16,6 +16,8 @@ user_create() {
   info "Сейчас задайте пароль пользователю $username; ввод не отображается и не логируется"
   passwd "$username" || return 1
   sudo_nopasswd_for_user "$username" || return 1
+  # Reuse the verified newly created account in the following SSH setup step.
+  SRV_SETTINGS_CREATED_SUDO_USER="$username"
   warn "Проверьте вход в SSH под $username до отключения root!"
   ssh_allow_user_after_creation "$username" || return 1
 }
