@@ -50,7 +50,7 @@ sudo bash /tmp/srv-settings-bootstrap.sh
 Отключить цвет можно переменной `NO_COLOR`:
 
 ```bash
-sudo --preserve-env=NO_COLOR NO_COLOR=1 bash /opt/srv-settings/setup.sh
+sudo env NO_COLOR=1 bash /opt/srv-settings/setup.sh
 ```
 
 При `TERM=dumb` цвета также отключаются. Стандартный формат подтверждений и возврат ошибок не изменены.
