@@ -1,8 +1,56 @@
 #!/usr/bin/env bash
 
-info() { printf '[INFO] %s\n' "$*"; }
-warn() { printf '[WARN] %s\n' "$*" >&2; }
-fail() { printf '[ERROR] %s\n' "$*" >&2; return 1; }
+# ANSI formatting is restricted to interactive terminals.
+# Redirected logs, dumb terminals and NO_COLOR always remain plain text.
+ui_output_is_terminal() { [[ -t "$1" ]]; }
+
+ui_color_enabled() {
+  [[ -z "${NO_COLOR:-}" && -n "${TERM:-}" && "${TERM:-}" != dumb ]] &&
+    ui_output_is_terminal "$1"
+}
+
+# INFO/OK => stdout, WARN/ERROR => stderr.
+# Only labels are colored, except critical failures.
+ui_log() {
+  local label="$1" color="$2" fd="$3" full="$4"
+  shift 4
+  local start='' reset=''
+  if ui_color_enabled "$fd"; then
+    printf -v start '\033[%sm' "$color"
+    printf -v reset '\033[0m'
+  fi
+  if [[ "$full" == yes ]]; then
+    printf '%s[%s] %s%s\n' "$start" "$label" "$*" "$reset" >&"$fd"
+  else
+    printf '%s[%s]%s %s\n' "$start" "$label" "$reset" "$*" >&"$fd"
+  fi
+}
+
+info() { ui_log INFO 36 1 no "$*"; }
+success() { ui_log ' OK ' '1;32' 1 no "$*"; }
+warn() { ui_log WARN '1;33' 2 no "$*"; }
+attention() { ui_log ВАЖНО '1;33' 2 yes "$*"; }
+fail() { ui_log ERROR '1;31' 2 yes "$*"; return 1; }
+
+# Numbered stages are printed by the full-setup wizard.
+section() {
+  local number="$1" title="$2" start='' reset=''
+  if ui_color_enabled 1; then
+    printf -v start '\033[36m'
+    printf -v reset '\033[0m'
+  fi
+  printf '\n%s━━━ [ %s ] %s ━━━%s\n' "$start" "$number" "$title" "$reset"
+}
+
+# Highlight a copy-ready SSH command on a single line.
+ssh_command() {
+  local port="$1" target="$2" start='' reset=''
+  if ui_color_enabled 1; then
+    printf -v start '\033[1;32m'
+    printf -v reset '\033[0m'
+  fi
+  printf '\n    %sssh -p %s %s%s\n\n' "$start" "$port" "$target" "$reset"
+}
 
 # Supported LTS releases are checked in setup.sh and in tests.
 ubuntu_release_supported() {

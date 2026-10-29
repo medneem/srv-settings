@@ -126,9 +126,9 @@ ssh_prepare_login_target() {
 ssh_show_login_command() {
   local username="$1" port="$2"
   if ssh_prepare_login_target "$username"; then
-    printf '\n    ssh -p %s %s\n\n' "$port" "$SSH_LOGIN_TARGET"
+    ssh_command "$port" "$SSH_LOGIN_TARGET"
   else
-    printf '\n    ssh -p %s %s@АДРЕС_СЕРВЕРА\n\n' "$port" "$username"
+    ssh_command "$port" "$username@АДРЕС_СЕРВЕРА"
     warn 'Автоматически определить адрес сервера не удалось. Используйте адрес, по которому подключаетесь обычно.'
   fi
 }
@@ -194,16 +194,16 @@ ssh_apply() {
   root_mode="${current_root:-prohibit-password}"
   local login_target=''
   if confirm 'Отключить SSH-вход root (PermitRootLogin no)?'; then
-    warn 'После отключения root больше не сможет подключаться по SSH. Сначала проверьте другой способ входа!'
+    attention 'После отключения root больше не сможет подключаться по SSH. Сначала проверьте другой способ входа!'
     info '1. НЕ закрывайте текущую SSH-сессию. Откройте ВТОРОЙ терминал на своём компьютере.'
     if ssh_prepare_login_target "${SRV_SETTINGS_CREATED_SUDO_USER:-}"; then
       login_target="$SSH_LOGIN_TARGET"
       info "2. Скопируйте команду ниже во ВТОРОЙ терминал (ТЕКУЩИЙ SSH-порт):"
-      printf '\n    ssh -p %s %s\n\n' "$oldport" "$login_target"
+      ssh_command "$oldport" "$login_target"
       info '   Убедитесь, что адрес сервера доступен с вашего компьютера (учтите NAT и доменные имена).'
     else
       info '2. Подключитесь в другом терминале привычным способом на ТЕКУЩИЙ SSH-порт:'
-      printf '\n    ssh -p %s ПОЛЬЗОВАТЕЛЬ@АДРЕС_СЕРВЕРА\n\n' "$oldport"
+      ssh_command "$oldport" 'ПОЛЬЗОВАТЕЛЬ@АДРЕС_СЕРВЕРА'
       warn 'Адрес сервера не запрашивается. Воспользуйтесь адресом, по которому вы обычно подключаетесь.'
     fi
     info '3. Выполните whoami — должно быть имя созданного пользователя, не root.'
@@ -216,7 +216,7 @@ ssh_apply() {
     fi
   fi
   warn "Новые настройки: port=$newport, PasswordAuthentication=$passwd_mode, PermitRootLogin=$root_mode"
-  warn 'Текущая SSH-сессия должна оставаться открытой. Новый порт надо проверить во ВТОРОМ терминале.'
+  attention 'Текущая SSH-сессия должна оставаться открытой. Новый порт надо проверить во ВТОРОМ терминале.'
   confirm 'Применить с автоматическим откатом через 5 минут?' || return 0
 
   # Открываем оба порта ДО перезапуска SSH; старые UFW-правила не удаляются.
@@ -285,14 +285,15 @@ ssh_apply() {
 
   info "SSH слушает $newport. В течение 5 минут проверьте НОВОЕ подключение из второго терминала:"
   if [[ -n "$login_target" ]]; then
-    printf '\n    ssh -p %s %s\n\n' "$newport" "$login_target"
+    ssh_command "$newport" "$login_target"
   else
-    warn 'Для подключения используйте: ssh -p НОВЫЙ_ПОРТ ПОЛЬЗОВАТЕЛЬ@АДРЕС_СЕРВЕРА'
+    warn 'Адрес входа не удалось определить автоматически. Используйте свой адрес сервера:'
+    ssh_command "$newport" 'ПОЛЬЗОВАТЕЛЬ@АДРЕС_СЕРВЕРА'
     info "Новый SSH-порт: $newport"
   fi
   if confirm 'Удалось войти в НОВОМ терминале по SSH? (yes отменяет автооткат)'; then
     systemctl stop "$unit.timer" || warn 'Не удалось отменить таймер: проверьте systemctl list-timers!'
-    info 'Настройки сохранены. Старые порты UFW НЕ удалены; их можно закрыть позже вручную.'
+    success 'Настройки сохранены. Старые порты UFW НЕ удалены; их можно закрыть позже вручную.'
   else
     warn 'Восстановление предыдущей SSH-конфигурации'
     bash "$rollback" || warn "Ручное восстановление: bash $rollback"
@@ -407,10 +408,10 @@ ssh_allowusers_apply() {
   port="$(ssh_current_login_port)"
   ssh_show_login_command "$username" "$port"
   info "В новом сеансе выполните: whoami; sudo id -u (ожидаются $username и 0)."
-  warn 'Если вход не работает, НЕ закрывайте текущую сессию. Автооткат через 5 минут.'
+  attention 'Если вход не работает, НЕ закрывайте текущую сессию. Автооткат через 5 минут.'
   if confirm "Подтверждаете НОВЫЙ успешный SSH-вход $username с sudo (вывод 0)? (y отменяет откат)"; then
     if ssh_allowusers_cancel_rollback "$unit"; then
-      info 'AllowUsers подтверждён; автоматический откат отменён.'
+      success 'AllowUsers подтверждён; автоматический откат отменён.'
     else
       warn "Таймер отката не удалось надёжно отменить. Проверьте: systemctl list-timers --all"
       return 1
@@ -427,7 +428,7 @@ ssh_allow_user_after_creation() {
   port="$(ssh_current_login_port)"
   warn 'AllowUsers ограничит SSH-вход только перечисленными пользователями, включая нового.'
   warn 'Если до сих пор не было AllowUsers, root и другие учётные записи потеряют возможность нового SSH-входа.'
-  info '1. НЕ закрывайте текущую SSH-сессию.'
+  attention '1. НЕ закрывайте текущую SSH-сессию.'
   info '2. Откройте ВТОРОЙ терминал на своём компьютере и выполните:'
   ssh_show_login_command "$username" "$port"
   info '   Если сервер использует NAT или перенаправление портов, подставьте внешний адрес/порт.'

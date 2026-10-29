@@ -20,6 +20,94 @@ eq() {
 }
 
 # Core setup should succeed without any Docker commands or dependencies.
+# Color output is interactive only and must preserve original stderr/status semantics.
+test_ui_log_levels_keep_streams_and_status() (
+  local dir code=0
+  dir="$(mktemp -d)"
+  trap 'rm -rf "$dir"' EXIT
+  info 'Information' >"$dir/out" 2>"$dir/err"
+  eq "$(cat "$dir/out")" "[INFO] Information" || return 1
+  [[ ! -s "$dir/err" ]] || return 1
+  success 'Completed' >"$dir/out" 2>"$dir/err"
+  eq "$(cat "$dir/out")" "[ OK ] Completed" || return 1
+  warn 'Warning' >"$dir/out" 2>"$dir/err"
+  eq "$(cat "$dir/err")" "[WARN] Warning" || return 1
+  [[ ! -s "$dir/out" ]] || return 1
+  fail 'Failure' >"$dir/out" 2>"$dir/err" || code=$?
+  [[ $code -eq 1 ]] || return 1
+  eq "$(cat "$dir/err")" "[ERROR] Failure" || return 1
+  [[ ! -s "$dir/out" ]]
+)
+
+test_ui_color_codes_reset() (
+  local out yellow green blue reset
+  printf -v yellow '\033[1;33m'
+  printf -v green '\033[1;32m'
+  printf -v blue '\033[36m'
+  printf -v reset '\033[0m'
+  ui_output_is_terminal() { return 0; }
+  TERM=xterm-256color
+  unset NO_COLOR
+  out="$(info 'Hello')" || return 1
+  eq "$out" "${blue}[INFO]${reset} Hello" || return 1
+  out="$(success 'OK')" || return 1
+  eq "$out" "${green}[ OK ]${reset} OK" || return 1
+  out="$(warn 'Careful' 2>&1)" || return 1
+  eq "$out" "${yellow}[WARN]${reset} Careful" || return 1
+  out="$(attention 'Do not close SSH' 2>&1)" || return 1
+  eq "$out" "${yellow}[ВАЖНО] Do not close SSH${reset}" || return 1
+  out="$(section '3/6' 'SSH')" || return 1
+  [[ "$out" == *"${blue}━━━ [ 3/6 ] SSH ━━━${reset}"* ]] || return 1
+  out="$(ssh_command 2203 'admins@203.0.113.42')" || return 1
+  [[ "$out" == *"${green}ssh -p 2203 admins@203.0.113.42${reset}"* ]]
+)
+
+test_ui_no_color_and_dumb_term() (
+  local out esc
+  printf -v esc '\033'
+  ui_output_is_terminal() { return 0; }
+  TERM=xterm
+  NO_COLOR=1
+  out="$(info 'no color'; section '2/6' 'TEST'; ssh_command 22 'admins@example.com')" || return 1
+  [[ "$out" != *"$esc"* ]] || return 1
+  unset NO_COLOR
+  TERM=dumb
+  out="$(attention 'no ANSI' 2>&1)" || return 1
+  [[ "$out" == '[ВАЖНО] no ANSI' && "$out" != *"$esc"* ]]
+)
+
+test_ui_redirected_output_is_plain() (
+  local dir esc
+  dir="$(mktemp -d)"
+  trap 'rm -rf "$dir"' EXIT
+  printf -v esc '\033'
+  TERM=xterm-256color
+  unset NO_COLOR
+  info 'Log' > "$dir/info"
+  warn 'Warning' 2> "$dir/warn"
+  ssh_command 22 'admins@example.com' > "$dir/ssh"
+  ! grep -q "$esc" "$dir/info" "$dir/warn" "$dir/ssh" || return 1
+  grep -Fxq '[INFO] Log' "$dir/info" || return 1
+  grep -Fxq '[WARN] Warning' "$dir/warn" || return 1
+  grep -Fxq '    ssh -p 22 admins@example.com' "$dir/ssh"
+)
+
+test_ui_full_setup_has_ordered_sections() (
+  local expected sections
+  expected="$(printf '%s\n' '1/6' '2/6' '3/6' '4/6' '5/6' '6/6')"
+  sections="$(sed -n '/^full_setup() {/,/^}/p' "$BASE_DIR/modules/full_setup.sh" |
+    grep -oE 'section "[1-6]/6"' | cut -d'"' -f2)"
+  eq "$sections" "$expected"
+)
+
+test_ui_ssh_uses_command_and_attention_helpers() {
+  local ssh="$BASE_DIR/modules/ssh.sh"
+  grep -Fq 'ssh_command "$port" "$SSH_LOGIN_TARGET"' "$ssh" &&
+  grep -Fq 'ssh_command "$oldport" "$login_target"' "$ssh" &&
+  grep -Fq 'ssh_command "$newport" "$login_target"' "$ssh" &&
+  grep -Fq "attention 'Текущая SSH-сессия должна оставаться открытой" "$ssh"
+}
+
 test_full_setup_without_docker() (
   local logfile expected
   logfile="$(mktemp)"
