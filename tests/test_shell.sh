@@ -851,13 +851,13 @@ EOF
 )
 
 test_fail2ban_setup_creates_global_ipv6_default_before_validation() (
-  local dir cfg global
+  local dir fixture_cfg global
   dir="$(mktemp -d)"
   trap 'rm -rf -- "$dir"' EXIT
-  cfg="$dir/jail.d/90-srv-settings.local"
+  fixture_cfg="$dir/jail.d/90-srv-settings.local"
   global="$dir/fail2ban.d/90-srv-settings.local"
   mkdir -p "$dir/jail.d"
-  fail2ban_setup_path() { echo "$cfg"; }
+  fail2ban_setup_path() { echo "$fixture_cfg"; }
   fail2ban_global_root() { echo "$dir"; }
   packages() { :; }
   backup() { :; }
@@ -884,13 +884,13 @@ test_fail2ban_setup_creates_global_ipv6_default_before_validation() (
 )
 
 test_fail2ban_setup_does_not_override_user_ipv6_preference() (
-  local dir cfg
+  local dir fixture_cfg
   dir="$(mktemp -d)"
   trap 'rm -rf -- "$dir"' EXIT
   mkdir -p "$dir/jail.d"
-  cfg="$dir/jail.d/90-srv-settings.local"
+  fixture_cfg="$dir/jail.d/90-srv-settings.local"
   printf '[Definition]\nallowipv6 = no\n' >"$dir/fail2ban.local"
-  fail2ban_setup_path() { echo "$cfg"; }
+  fail2ban_setup_path() { echo "$fixture_cfg"; }
   fail2ban_global_root() { echo "$dir"; }
   packages() { :; }
   backup() { :; }
@@ -914,13 +914,13 @@ test_fail2ban_setup_does_not_override_user_ipv6_preference() (
 )
 
 test_fail2ban_setup_restores_ipv6_file_after_validation_failure() (
-  local dir cfg
+  local dir fixture_cfg
   dir="$(mktemp -d)"
   trap 'rm -rf -- "$dir"' EXIT
   mkdir -p "$dir/jail.d"
-  cfg="$dir/jail.d/90-srv-settings.local"
-  printf '# pre-existing jail\n' >"$cfg"
-  fail2ban_setup_path() { echo "$cfg"; }
+  fixture_cfg="$dir/jail.d/90-srv-settings.local"
+  printf '# pre-existing jail\n' >"$fixture_cfg"
+  fail2ban_setup_path() { echo "$fixture_cfg"; }
   fail2ban_global_root() { echo "$dir"; }
   packages() { :; }
   backup() { :; }
@@ -928,7 +928,7 @@ test_fail2ban_setup_restores_ipv6_file_after_validation_failure() (
   fail2ban-client() { return 1; }
   systemctl() { echo 'Unexpected systemctl call' >&2; return 1; }
   if fail2ban_setup >/dev/null 2>&1; then return 1; fi
-  grep -Fxq '# pre-existing jail' "$cfg" || return 1
+  grep -Fxq '# pre-existing jail' "$fixture_cfg" || return 1
   [[ ! -e "$dir/fail2ban.d/90-srv-settings.local" ]]
 )
 
