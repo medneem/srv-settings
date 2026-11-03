@@ -203,6 +203,7 @@ ssh_apply() {
   root_mode="${current_root:-prohibit-password}"
   local login_target=''
   if confirm 'Отключить SSH-вход root (PermitRootLogin no)?'; then
+    attention 'После отключения root больше не сможет подключаться по SSH. Сначала проверьте другой способ входа!'
     if ssh_root_access_preverified "$oldport"; then
       root_mode=no
       info "SSH-вход ${SRV_SETTINGS_VERIFIED_SSH_USER} через порт $oldport уже проверен после применения AllowUsers."
@@ -211,7 +212,6 @@ ssh_apply() {
         login_target="$SSH_LOGIN_TARGET"
       fi
     else
-      attention 'После отключения root больше не сможет подключаться по SSH. Сначала проверьте другой способ входа!'
       info '1. НЕ закрывайте текущую SSH-сессию. Откройте ВТОРОЙ терминал на своём компьютере.'
       if ssh_prepare_login_target "${SRV_SETTINGS_CREATED_SUDO_USER:-}"; then
         login_target="$SSH_LOGIN_TARGET"
