@@ -666,8 +666,8 @@ test_ssh_port_switch_marker_only_for_real_change() (
   [[ "$SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT" == 22 ]] || return 1
   [[ "$SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT" == 2203 ]] || return 1
   ssh_mark_confirmed_port_change 2203 2203 || return 1
-  [[ -z "\${SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT:-}" &&
-     -z "\${SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT:-}" ]] || return 1
+  [[ -z "${SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT:-}" &&
+     -z "${SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT:-}" ]] || return 1
   grep -Fq 'ssh_mark_confirmed_port_change "$oldport" "$newport"' "$BASE_DIR/modules/ssh.sh"
 )
 
