@@ -183,7 +183,20 @@ ssh_root_access_preverified() {
      "${SRV_SETTINGS_VERIFIED_SSH_PORT:-}" == "$port" ]]
 }
 
+# Only the freshly confirmed SSH-port switch in this setup process qualifies
+# the previous UFW rule for an optional cleanup prompt.
+ssh_mark_confirmed_port_change() {
+  local oldport="$1" newport="$2"
+  unset SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT
+  if [[ "$oldport" != "$newport" ]]; then
+    SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT="$oldport"
+    SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT="$newport"
+  fi
+}
+
 ssh_apply() {
+  # An interrupted/retried SSH configuration must not reuse previous verification.
+  unset SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT
   packages openssh-server ufw || return 1
   local oldport newport passwd_mode root_mode cfg save_dir rollback unit
   local socket_active=0 service_active=0 current_pass current_root
@@ -310,7 +323,11 @@ ssh_apply() {
     info "Новый SSH-порт: $newport"
   fi
   if confirm 'Удалось войти в НОВОМ терминале по SSH? (yes отменяет автооткат)'; then
-    systemctl stop "$unit.timer" || warn 'Не удалось отменить таймер: проверьте systemctl list-timers!'
+    if ! ssh_allowusers_cancel_rollback "$unit"; then
+      warn 'Таймер отката SSH не отменён надёжно; старые правила UFW удалять нельзя.'
+      return 1
+    fi
+    ssh_mark_confirmed_port_change "$oldport" "$newport"
     success 'Настройки сохранены. Старые порты UFW НЕ удалены; их можно закрыть позже вручную.'
   else
     warn 'Восстановление предыдущей SSH-конфигурации'
