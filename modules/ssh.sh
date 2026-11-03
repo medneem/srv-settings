@@ -174,6 +174,15 @@ ssh_check_pending_config() {
   ssh_validate_effective_config "$effective" "$1" "$2" "$3"
 }
 
+# A successful post-AllowUsers re-login can be reused only in this shell run
+# and only for the created user on the same original SSH port.
+ssh_root_access_preverified() {
+  local port="$1" username="${SRV_SETTINGS_VERIFIED_SSH_USER:-}"
+  [[ -n "$username" && "$username" != root &&
+     "$username" == "${SRV_SETTINGS_CREATED_SUDO_USER:-}" &&
+     "${SRV_SETTINGS_VERIFIED_SSH_PORT:-}" == "$port" ]]
+}
+
 ssh_apply() {
   packages openssh-server ufw || return 1
   local oldport newport passwd_mode root_mode cfg save_dir rollback unit
@@ -195,24 +204,33 @@ ssh_apply() {
   local login_target=''
   if confirm 'Отключить SSH-вход root (PermitRootLogin no)?'; then
     attention 'После отключения root больше не сможет подключаться по SSH. Сначала проверьте другой способ входа!'
-    info '1. НЕ закрывайте текущую SSH-сессию. Откройте ВТОРОЙ терминал на своём компьютере.'
-    if ssh_prepare_login_target "${SRV_SETTINGS_CREATED_SUDO_USER:-}"; then
-      login_target="$SSH_LOGIN_TARGET"
-      info "2. Скопируйте команду ниже во ВТОРОЙ терминал (ТЕКУЩИЙ SSH-порт):"
-      ssh_command "$oldport" "$login_target"
-      info '   Убедитесь, что адрес сервера доступен с вашего компьютера (учтите NAT и доменные имена).'
-    else
-      info '2. Подключитесь в другом терминале привычным способом на ТЕКУЩИЙ SSH-порт:'
-      ssh_command "$oldport" 'ПОЛЬЗОВАТЕЛЬ@АДРЕС_СЕРВЕРА'
-      warn 'Адрес сервера не запрашивается. Воспользуйтесь адресом, по которому вы обычно подключаетесь.'
-    fi
-    info '3. Выполните whoami — должно быть имя созданного пользователя, не root.'
-    info '4. Выполните: sudo -v && sudo id -u — ожидается 0. При NOPASSWD пароль не требуется.'
-    info 'Только после успешной проверки отвечайте y. Если не проверили — нажмите Enter (N).'
-    if confirm 'Уже вошли во ВТОРОМ SSH-сеансе под созданным пользователем и проверили sudo (вывод 0)?'; then
+    if ssh_root_access_preverified "$oldport"; then
       root_mode=no
+      info "SSH-вход ${SRV_SETTINGS_VERIFIED_SSH_USER} через порт $oldport уже проверен после применения AllowUsers."
+      info 'Повторная проверка старого порта не требуется. После изменения SSH-настроек проверьте НОВОЕ подключение.'
+      if ssh_prepare_login_target "$SRV_SETTINGS_VERIFIED_SSH_USER"; then
+        login_target="$SSH_LOGIN_TARGET"
+      fi
     else
-      warn 'Root SSH оставлен без изменений'
+      info '1. НЕ закрывайте текущую SSH-сессию. Откройте ВТОРОЙ терминал на своём компьютере.'
+      if ssh_prepare_login_target "${SRV_SETTINGS_CREATED_SUDO_USER:-}"; then
+        login_target="$SSH_LOGIN_TARGET"
+        info "2. Скопируйте команду ниже во ВТОРОЙ терминал (ТЕКУЩИЙ SSH-порт):"
+        ssh_command "$oldport" "$login_target"
+        info '   Убедитесь, что адрес сервера доступен с вашего компьютера (учтите NAT и доменные имена).'
+      else
+        info '2. Подключитесь в другом терминале привычным способом на ТЕКУЩИЙ SSH-порт:'
+        ssh_command "$oldport" 'ПОЛЬЗОВАТЕЛЬ@АДРЕС_СЕРВЕРА'
+        warn 'Адрес сервера не запрашивается. Воспользуйтесь адресом, по которому вы обычно подключаетесь.'
+      fi
+      info '3. Выполните whoami — должно быть имя созданного пользователя, не root.'
+      info '4. Выполните: sudo -v && sudo id -u — ожидается 0. При NOPASSWD пароль не требуется.'
+      info 'Только после успешной проверки отвечайте y. Если не проверили — нажмите Enter (N).'
+      if confirm 'Уже вошли во ВТОРОМ SSH-сеансе под созданным пользователем и проверили sudo (вывод 0)?'; then
+        root_mode=no
+      else
+        warn 'Root SSH оставлен без изменений'
+      fi
     fi
   fi
   warn "Новые настройки: port=$newport, PasswordAuthentication=$passwd_mode, PermitRootLogin=$root_mode"
@@ -351,6 +369,10 @@ ssh_allowusers_apply() {
     info "Пользователь $username уже присутствует в глобальном AllowUsers."
     return 0
   fi
+  # Any new AllowUsers modification invalidates an earlier cached verification.
+  if [[ "${SRV_SETTINGS_VERIFIED_SSH_USER:-}" == "$username" ]]; then
+    unset SRV_SETTINGS_VERIFIED_SSH_USER SRV_SETTINGS_VERIFIED_SSH_PORT
+  fi
 
   if ! /usr/sbin/sshd -t -f "$staged"; then
     rm -f -- "$staged"
@@ -417,6 +439,8 @@ ssh_allowusers_apply() {
   ssh_allowusers_post_apply_instructions "$username"
   if confirm "Подтверждаете НОВЫЙ успешный SSH-вход $username с sudo (вывод 0)? (y отменяет откат)"; then
     if ssh_allowusers_cancel_rollback "$unit"; then
+      SRV_SETTINGS_VERIFIED_SSH_USER="$username"
+      SRV_SETTINGS_VERIFIED_SSH_PORT="$(ssh_current_login_port)"
       success 'AllowUsers подтверждён; автоматический откат отменён.'
     else
       warn "Таймер отката не удалось надёжно отменить. Проверьте: systemctl list-timers --all"

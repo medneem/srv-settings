@@ -10,7 +10,7 @@ ui_color_enabled() {
 }
 
 # INFO/OK => stdout, WARN/ERROR => stderr.
-# Only labels are colored, except critical failures.
+# INFO/OK color the label; WARN/ERROR color the entire message.
 ui_log() {
   local label="$1" color="$2" fd="$3" full="$4"
   shift 4
@@ -28,8 +28,8 @@ ui_log() {
 
 info() { ui_log INFO 36 1 no "$*"; }
 success() { ui_log ' OK ' '1;32' 1 no "$*"; }
-warn() { ui_log WARN '1;38;5;208' 2 no "$*"; }
-attention() { ui_log WARN '1;38;5;208' 2 yes "$*"; }
+warn() { ui_log WARN '1;38;5;208' 2 yes "$*"; }
+attention() { warn "$*"; }
 fail() { ui_log ERROR '1;31' 2 yes "$*"; return 1; }
 
 # Numbered stages are printed by the full-setup wizard.
