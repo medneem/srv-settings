@@ -1259,6 +1259,61 @@ test_ssh_rollback_contract() {
   grep -Fq 'systemctl restart ssh.socket' "$BASE_DIR/modules/ssh.sh" || return 1
 }
 
+
+test_server_reboot_cancellation_is_safe() (
+  local log
+  log="$(mktemp)"
+  trap 'rm -f "$log"' EXIT
+  confirm() { [[ "$1" == 'Перезагрузить сервер сейчас?' ]] || return 1; return 1; }
+  systemctl() { printf 'Unexpected systemctl call: %s\n' "$*" >&2; return 1; }
+  server_reboot >"$log" 2>&1 || return 1
+  [[ "${SRV_SETTINGS_REBOOT_REQUESTED:-}" == 0 ]] || return 1
+  grep -Fq '[WARN] Перезагрузка' "$log" &&
+    grep -Fq 'Перезагрузка отменена' "$log"
+)
+
+test_server_reboot_confirmation_runs_once() (
+  local calls=0
+  confirm() { [[ "$1" == 'Перезагрузить сервер сейчас?' ]]; }
+  systemctl() {
+    [[ "$*" == 'reboot' ]] || return 1
+    ((calls+=1))
+  }
+  server_reboot >/dev/null 2>&1 || return 1
+  [[ "$calls" == 1 && "${SRV_SETTINGS_REBOOT_REQUESTED:-}" == 1 ]]
+)
+
+test_server_reboot_failed_command_is_not_success() (
+  local calls=0 log
+  log="$(mktemp)"
+  trap 'rm -f "$log"' EXIT
+  confirm() { return 0; }
+  systemctl() { ((calls+=1)); return 1; }
+  if server_reboot >"$log" 2>&1; then
+    echo 'Reboot falsely succeeded after systemctl failure' >&2
+    return 1
+  fi
+  [[ "$calls" == 1 && "${SRV_SETTINGS_REBOOT_REQUESTED:-}" == 0 ]] || return 1
+  grep -Fq '[ERROR] Не удалось отправить команду перезагрузки' "$log"
+)
+
+test_main_menu_reboot_entry() {
+  local menu="$BASE_DIR/setup.sh"
+  grep -Fq "printf '9. Перезагрузка сервера\n'" "$menu" &&
+    grep -Fq '9) if server_reboot; then' "$menu" &&
+    grep -Fq '[[ ${SRV_SETTINGS_REBOOT_REQUESTED:-0} == 1 ]] && return 0' "$menu" &&
+    grep -Fq "Выберите пункт меню от 0 до 9" "$menu"
+}
+
+test_readme_is_for_users_and_shows_reboot() {
+  local readme="$BASE_DIR/README.md"
+  grep -Fq '9. Перезагрузка сервера' "$readme" &&
+    grep -Fq 'sudo bash /opt/srv-settings/setup.sh' "$readme" &&
+    ! grep -Fq '**Статус:** первая рабочая версия' "$readme" &&
+    ! grep -Fq '## Разработка' "$readme" &&
+    ! grep -Fq '## Структура проекта' "$readme"
+}
+
 test_main_menu_has_additional_section_no_backup_item() {
   local menu="$BASE_DIR/setup.sh" expected
   if grep -Fq "printf '8. Резервное копирование" "$menu" ||
