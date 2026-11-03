@@ -53,7 +53,7 @@ test_ui_color_codes_reset() (
   out="$(success 'OK')" || return 1
   eq "$out" "${green}[ OK ]${reset} OK" || return 1
   out="$(warn 'Careful' 2>&1)" || return 1
-  eq "$out" "${orange}[WARN]${reset} Careful" || return 1
+  eq "$out" "${orange}[WARN] Careful${reset}" || return 1
   out="$(attention 'Do not close SSH' 2>&1)" || return 1
   eq "$out" "${orange}[WARN] Do not close SSH${reset}" || return 1
   out="$(section '3/6' 'SSH')" || return 1
@@ -73,7 +73,9 @@ test_ui_no_color_and_dumb_term() (
   unset NO_COLOR
   TERM=dumb
   out="$(attention 'no ANSI' 2>&1)" || return 1
-  [[ "$out" == '[WARN] no ANSI' && "$out" != *"$esc"* ]]
+  [[ "$out" == '[WARN] no ANSI' && "$out" != *"$esc"* ]] || return 1
+  out="$(warn 'no ANSI either' 2>&1)" || return 1
+  [[ "$out" == '[WARN] no ANSI either' && "$out" != *"$esc"* ]]
 )
 
 test_ui_redirected_output_is_plain() (
@@ -92,6 +94,45 @@ test_ui_redirected_output_is_plain() (
   grep -Fxq '[WARN] Warning' "$dir/warn" || return 1
   grep -Fxq '[WARN] Critical' "$dir/critical" || return 1
   grep -Fxq '    ssh -p 22 admins@example.com' "$dir/ssh"
+)
+
+# The current timezone is explanatory only; the Enter/default selection is Moscow.
+test_system_setup_timezone_default_moscow() (
+  local prompt='' default='' applied=''
+  packages() { :; }
+  timedatectl() {
+    case "$1" in
+      show) printf 'Europe/Berlin\n' ;;
+      list-timezones) printf 'Europe/Berlin\nEurope/Moscow\n' ;;
+      set-timezone) applied="$2" ;;
+      set-ntp|status) : ;;
+      *) return 1 ;;
+    esac
+  }
+  ask() { prompt="$1"; default="$2"; REPLY="$2"; }
+  confirm() { return 1; }
+  system_setup >/dev/null 2>&1 || return 1
+  eq "$prompt" 'Часовой пояс (например, Europe/Berlin)' &&
+    eq "$default" 'Europe/Moscow' &&
+    eq "$applied" 'Europe/Moscow'
+)
+
+test_system_setup_timezone_custom_choice_still_works() (
+  local applied=''
+  packages() { :; }
+  timedatectl() {
+    case "$1" in
+      show) printf 'Etc/UTC\n' ;;
+      list-timezones) printf 'Europe/Moscow\nAsia/Almaty\n' ;;
+      set-timezone) applied="$2" ;;
+      set-ntp|status) : ;;
+      *) return 1 ;;
+    esac
+  }
+  ask() { REPLY='Asia/Almaty'; }
+  confirm() { return 1; }
+  system_setup >/dev/null 2>&1 || return 1
+  eq "$applied" 'Asia/Almaty'
 )
 
 test_ui_full_setup_has_ordered_sections() (
@@ -337,6 +378,67 @@ test_ssh_login_port_falls_back_to_effective_config() (
   SSH_CONNECTION=''
   ssh_ports() { printf '2203\n'; }
   eq "$(ssh_current_login_port)" "2203"
+)
+
+# Root lockout may reuse the confirmed post-AllowUsers login in this wizard run.
+test_ssh_verified_user_marker_requires_same_user_and_old_port() (
+  SRV_SETTINGS_CREATED_SUDO_USER=admins
+  SRV_SETTINGS_VERIFIED_SSH_USER=admins
+  SRV_SETTINGS_VERIFIED_SSH_PORT=22
+  ssh_root_access_preverified 22 || return 1
+  if ssh_root_access_preverified 2203; then return 1; fi
+  SRV_SETTINGS_CREATED_SUDO_USER=other
+  if ssh_root_access_preverified 22; then return 1; fi
+  SRV_SETTINGS_CREATED_SUDO_USER=admins
+  SRV_SETTINGS_VERIFIED_SSH_USER=''
+  if ssh_root_access_preverified 22; then return 1; fi
+)
+
+test_ssh_root_preverified_skips_redundant_login_check() (
+  local confirms=0 logfile
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  SRV_SETTINGS_CREATED_SUDO_USER=admins
+  SRV_SETTINGS_VERIFIED_SSH_USER=admins
+  SRV_SETTINGS_VERIFIED_SSH_PORT=22
+  packages() { :; }
+  ssh_current_login_port() { printf '22\n'; }
+  ask_port() { PORT=2203; }
+  ask() { REPLY=yes; }
+  ssh_prepare_login_target() { SSH_LOGIN_TARGET='admins@203.0.113.42'; }
+  confirm() {
+    ((confirms+=1))
+    case "$confirms" in
+      1) [[ "$1" == 'Отключить SSH-вход root (PermitRootLogin no)?' ]] ;;
+      2) [[ "$1" == 'Применить с автоматическим откатом через 5 минут?' ]]; return 1 ;;
+      *) echo "Unexpected extra confirmation: $1" >&2; return 1 ;;
+    esac
+  }
+  ufw() { echo 'Unexpected UFW call' >&2; return 1; }
+  ssh_apply >"$logfile" 2>&1 || return 1
+  [[ "$confirms" == 2 ]] || return 1
+  grep -Fq 'PermitRootLogin=no' "$logfile" || return 1
+  grep -Fq 'уже проверен после применения AllowUsers' "$logfile" || return 1
+  ! grep -Fq 'ssh -p 22 ' "$logfile"
+)
+
+test_ssh_root_without_verified_marker_keeps_safe_prompt() (
+  local confirms=0 logfile
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  unset SRV_SETTINGS_VERIFIED_SSH_USER SRV_SETTINGS_VERIFIED_SSH_PORT
+  SRV_SETTINGS_CREATED_SUDO_USER=admins
+  packages() { :; }
+  ssh_current_login_port() { printf '22\n'; }
+  ask_port() { PORT=2203; }
+  ask() { REPLY=yes; }
+  ssh_prepare_login_target() { SSH_LOGIN_TARGET='admins@203.0.113.42'; }
+  confirm() { ((confirms+=1)); [[ "$confirms" == 1 ]]; }
+  ufw() { echo 'Unexpected UFW call' >&2; return 1; }
+  ssh_apply >"$logfile" 2>&1 || return 1
+  [[ "$confirms" == 3 ]] || return 1
+  grep -Fq 'Root SSH оставлен без изменений' "$logfile" || return 1
+  grep -Fq 'ssh -p 22 admins@203.0.113.42' "$logfile"
 )
 
 test_allowusers_shows_login_command_before_confirmation() (
