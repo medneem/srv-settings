@@ -825,6 +825,105 @@ test_ufw_initialization_order() (
 )
 
 
+
+# Fail2ban 1.0.x may warn about its implicit IPv6 default before reading jails.
+# Never overwrite another operator's explicit allowipv6 setting.
+test_fail2ban_global_ipv6_detection_respects_other_config() (
+  local dir
+  dir="$(mktemp -d)"
+  trap 'rm -rf -- "$dir"' EXIT
+  mkdir -p "$dir/fail2ban.d"
+  cat >"$dir/fail2ban.conf" <<'EOF'
+[Definition]
+#allowipv6 = auto
+EOF
+  if fail2ban_allowipv6_defined "$dir"; then
+    echo 'Commented-out allowipv6 incorrectly detected' >&2; return 1
+  fi
+  printf '[Definition]\nallowipv6 = no\n' >"$dir/fail2ban.local"
+  fail2ban_allowipv6_defined "$dir" || return 1
+  rm -f "$dir/fail2ban.local"
+  printf '[DEFAULT]\nallowipv6 = yes\n' >"$dir/fail2ban.d/99-manual.local"
+  fail2ban_allowipv6_defined "$dir" || return 1
+  rm -f "$dir/fail2ban.d/99-manual.local"
+  printf '[Definition]\nallowipv6 = auto\n' >"$dir/fail2ban.d/defaults.conf"
+  fail2ban_allowipv6_defined "$dir"
+)
+
+test_fail2ban_setup_creates_global_ipv6_default_before_validation() (
+  local dir cfg global
+  dir="$(mktemp -d)"
+  trap 'rm -rf -- "$dir"' EXIT
+  cfg="$dir/jail.d/90-srv-settings.local"
+  global="$dir/fail2ban.d/90-srv-settings.local"
+  mkdir -p "$dir/jail.d"
+  fail2ban_setup_path() { echo "$cfg"; }
+  fail2ban_global_root() { echo "$dir"; }
+  packages() { :; }
+  backup() { :; }
+  ssh_ports() { echo 2203; }
+  confirm() { return 1; }
+  fail2ban-client() {
+    case "$*" in
+      -t) grep -Fxq 'allowipv6 = auto' "$global" ;;
+      'status sshd') echo 'Status for jail: sshd' ;;
+      *) echo "Unexpected fail2ban-client call: $*" >&2; return 1 ;;
+    esac
+  }
+  systemctl() { [[ "$*" == 'enable fail2ban' || "$*" == 'restart fail2ban' ]]; }
+  fail2ban_setup >/dev/null 2>&1 || return 1
+  [[ "$(stat -c %a "$global")" == 644 ]] || return 1
+  grep -Fxq '[Definition]' "$global" || return 1
+  grep -Fxq 'allowipv6 = auto' "$global" || return 1
+  fail2ban_setup >/dev/null 2>&1 || return 1
+  grep -Fxq 'allowipv6 = auto' "$global"
+)
+
+test_fail2ban_setup_does_not_override_user_ipv6_preference() (
+  local dir cfg
+  dir="$(mktemp -d)"
+  trap 'rm -rf -- "$dir"' EXIT
+  mkdir -p "$dir/jail.d"
+  cfg="$dir/jail.d/90-srv-settings.local"
+  printf '[Definition]\nallowipv6 = no\n' >"$dir/fail2ban.local"
+  fail2ban_setup_path() { echo "$cfg"; }
+  fail2ban_global_root() { echo "$dir"; }
+  packages() { :; }
+  backup() { :; }
+  ssh_ports() { echo 2203; }
+  confirm() { return 1; }
+  fail2ban-client() {
+    case "$*" in
+      -t) grep -Fxq 'allowipv6 = no' "$dir/fail2ban.local" ;;
+      'status sshd') : ;;
+      *) return 1 ;;
+    esac
+  }
+  systemctl() { [[ "$*" == 'enable fail2ban' || "$*" == 'restart fail2ban' ]]; }
+  fail2ban_setup >/dev/null 2>&1 || return 1
+  [[ ! -e "$dir/fail2ban.d/90-srv-settings.local" ]] || return 1
+  grep -Fxq 'allowipv6 = no' "$dir/fail2ban.local"
+)
+
+test_fail2ban_setup_restores_ipv6_file_after_validation_failure() (
+  local dir cfg
+  dir="$(mktemp -d)"
+  trap 'rm -rf -- "$dir"' EXIT
+  mkdir -p "$dir/jail.d"
+  cfg="$dir/jail.d/90-srv-settings.local"
+  printf '# pre-existing jail\n' >"$cfg"
+  fail2ban_setup_path() { echo "$cfg"; }
+  fail2ban_global_root() { echo "$dir"; }
+  packages() { :; }
+  backup() { :; }
+  ssh_ports() { echo 2203; }
+  fail2ban-client() { return 1; }
+  systemctl() { echo 'Unexpected systemctl call' >&2; return 1; }
+  if fail2ban_setup >/dev/null 2>&1; then return 1; fi
+  grep -Fxq '# pre-existing jail' "$cfg" || return 1
+  [[ ! -e "$dir/fail2ban.d/90-srv-settings.local" ]]
+)
+
 test_fail2ban_wait_ready_retries_until_ssh_jail_responds() (
   local checks=0 pauses=0
   fail2ban-client() {
@@ -858,6 +957,7 @@ test_fail2ban_setup_waits_for_ready_jail_without_double_start() (
   trap 'rm -rf -- "$dir"' EXIT
   fixture_cfg="$dir/90-srv-settings.local"
   fail2ban_setup_path() { printf '%s\n' "$fixture_cfg"; }
+  fail2ban_global_root() { printf '%s\n' "$dir"; }
   packages() { return 0; }
   backup() { return 0; }
   ssh_ports() { printf '2203\n'; }
@@ -883,7 +983,8 @@ test_fail2ban_setup_waits_for_ready_jail_without_double_start() (
   fail2ban_setup || return 1
   [[ "$calls" == 4 && "$pauses" == 2 ]] || return 1
   [[ "$(cat "$dir/systemctl.log")" == "$(printf 'enable fail2ban\nrestart fail2ban')" ]] || return 1
-  grep -Fxq 'port = 2203' "$fixture_cfg"
+  grep -Fxq 'port = 2203' "$fixture_cfg" || return 1
+  grep -Fxq 'allowipv6 = auto' "$dir/fail2ban.d/90-srv-settings.local"
 )
 
 test_fail2ban_setup_failed_service_restores_previous_jail() (
@@ -893,6 +994,7 @@ test_fail2ban_setup_failed_service_restores_previous_jail() (
   fixture_cfg="$dir/90-srv-settings.local"
   printf '%s\n' '# previous working configuration' > "$fixture_cfg"
   fail2ban_setup_path() { printf '%s\n' "$fixture_cfg"; }
+  fail2ban_global_root() { printf '%s\n' "$dir"; }
   packages() { return 0; }
   backup() { return 0; }
   ssh_ports() { printf '22\n'; }
@@ -918,7 +1020,8 @@ test_fail2ban_setup_failed_service_restores_previous_jail() (
     return 1
   fi
   [[ "$status_checks" -ge 2 ]] || return 1
-  grep -Fxq '# previous working configuration' "$fixture_cfg"
+  grep -Fxq '# previous working configuration' "$fixture_cfg" || return 1
+  [[ ! -e "$dir/fail2ban.d/90-srv-settings.local" ]]
 )
 
 test_fail2ban_setup_failure_on_first_install_removes_partial_jail() (
@@ -927,6 +1030,7 @@ test_fail2ban_setup_failure_on_first_install_removes_partial_jail() (
   trap 'rm -rf -- "$dir"' EXIT
   fixture_cfg="$dir/90-srv-settings.local"
   fail2ban_setup_path() { printf '%s\n' "$fixture_cfg"; }
+  fail2ban_global_root() { printf '%s\n' "$dir"; }
   packages() { return 0; }
   backup() { return 0; }
   ssh_ports() { printf '22\n'; }
@@ -944,7 +1048,8 @@ test_fail2ban_setup_failure_on_first_install_removes_partial_jail() (
   sleep() { :; }
   confirm() { return 1; }
   if fail2ban_setup >/dev/null 2>&1; then return 1; fi
-  [[ ! -e "$fixture_cfg" ]]
+  [[ ! -e "$fixture_cfg" ]] || return 1
+  [[ ! -e "$dir/fail2ban.d/90-srv-settings.local" ]]
 )
 
 test_fail2ban_ignore_add_remove_and_rollback() (
