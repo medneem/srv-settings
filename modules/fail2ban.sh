@@ -5,6 +5,67 @@ fail2ban_setup_path() {
   printf '%s\n' /etc/fail2ban/jail.d/90-srv-settings.local
 }
 
+
+# fail2ban 1.0.x on Ubuntu 24.04 emits a warning when the global
+# [Definition] allowipv6 option is not set. This is not a jail setting.
+# Keep the managed override separate from the operator's configuration.
+fail2ban_global_root() {
+  printf '%s\n' /etc/fail2ban
+}
+
+fail2ban_allowipv6_path() {
+  printf '%s/fail2ban.d/90-srv-settings.local\n' "$(fail2ban_global_root)"
+}
+
+# Respect an explicit IPv6 preference in any Fail2ban global config layer.
+# Stock commented-out settings do not count.
+fail2ban_allowipv6_defined() {
+  local root="$1" file
+  for file in "$root/fail2ban.conf" "$root/fail2ban.local" \
+    "$root"/fail2ban.d/*.conf "$root"/fail2ban.d/*.local; do
+    [[ -f "$file" ]] || continue
+    if awk '
+      /^[[:space:]]*[#;]/ { next }
+      /^[[:space:]]*\[/ {
+        section=$0
+        sub(/^[[:space:]]*\[/, "", section)
+        sub(/\].*$/, "", section)
+        section=tolower(section)
+        next
+      }
+      (section=="definition" || section=="default") &&
+        tolower($0) ~ /^[[:space:]]*allowipv6[[:space:]]*=/ {
+          found=1
+          exit
+        }
+      END { exit !found }
+    ' "$file"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Only create our own file. Never modify an existing global override.
+fail2ban_create_allowipv6_default() {
+  local target="$1" parent staged
+  if [[ -e "$target" || -L "$target" ]]; then
+    warn "Существующий $target оставлен без изменений."
+    return 1
+  fi
+  parent="$(dirname "$target")"
+  mkdir -p -- "$parent" || return 1
+  staged="$(mktemp "$parent/.srv-settings-ipv6-XXXXXXXX")" || return 1
+  if ! printf '[Definition]\nallowipv6 = auto\n' > "$staged" ||
+     ! chmod 0644 "$staged" ||
+     ! mv -n -- "$staged" "$target" ||
+     [[ -e "$staged" ]]; then
+    rm -f -- "$staged"
+    fail "Не удалось безопасно создать $target"
+    return 1
+  fi
+}
+
 # fail2ban-client -t only checks syntax; the daemon may still be starting.
 # Treat Fail2ban as ready only when its SSH jail answers over the socket.
 fail2ban_wait_ready() {
@@ -38,6 +99,7 @@ fail2ban_restore_setup_config() {
 fail2ban_setup() {
   packages fail2ban python3-systemd ufw || return 1
   local cfg port_list temp existed=0
+  local global_root global_path='' global_created=0
   cfg="$(fail2ban_setup_path)" || return 1
   port_list="$(ssh_ports | paste -sd, -)"
   [[ -n $port_list ]] || { fail 'Не удалось определить SSH-порт'; return 1; }
@@ -66,7 +128,32 @@ EOF
     rm -f -- "$temp"
     return 1
   fi
+  # Prevent the stock allowipv6 warning without changing an existing
+  # fail2ban.local or operator-defined IPv6 setting.
+  global_root="$(fail2ban_global_root)" || {
+    fail2ban_restore_setup_config "$cfg" "$temp" "$existed" || true
+    rm -f -- "$temp"
+    return 1
+  }
+  if ! fail2ban_allowipv6_defined "$global_root"; then
+    global_path="$(fail2ban_allowipv6_path)" || {
+      fail2ban_restore_setup_config "$cfg" "$temp" "$existed" || true
+      rm -f -- "$temp"
+      return 1
+    }
+    if [[ -e "$global_path" || -L "$global_path" ]]; then
+      warn "Глобальный $global_path уже существует без allowipv6; файл оставлен без изменений."
+    elif fail2ban_create_allowipv6_default "$global_path"; then
+      global_created=1
+    else
+      fail2ban_restore_setup_config "$cfg" "$temp" "$existed" || true
+      rm -f -- "$temp"
+      return 1
+    fi
+  fi
+
   if ! fail2ban-client -t; then
+    if (( global_created )); then rm -f -- "$global_path" || warn "Не удалось удалить $global_path"; fi
     fail2ban_restore_setup_config "$cfg" "$temp" "$existed" ||
       warn "Не удалось восстановить конфигурацию: $cfg"
     rm -f -- "$temp"
@@ -80,6 +167,7 @@ EOF
      ! systemctl restart fail2ban ||
      ! fail2ban_wait_ready 12; then
     fail2ban_show_startup_diagnostics
+    if (( global_created )); then rm -f -- "$global_path" || warn "Не удалось удалить $global_path"; fi
     if fail2ban_restore_setup_config "$cfg" "$temp" "$existed"; then
       warn 'Предыдущая конфигурация Fail2ban восстановлена.'
       systemctl restart fail2ban >/dev/null 2>&1 ||
