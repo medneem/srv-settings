@@ -5,7 +5,7 @@ system_setup() {
   packages ca-certificates curl ufw fail2ban rsyslog || return 1
   local zone
   zone="$(timedatectl show -p Timezone --value 2>/dev/null)"
-  ask 'Часовой пояс (например, Europe/Moscow)' "${zone:-Etc/UTC}" || return 1
+  ask "Часовой пояс (например, ${zone:-Etc/UTC})" Europe/Moscow || return 1
   if timedatectl list-timezones | grep -Fxq -- "$REPLY"; then
     timedatectl set-timezone "$REPLY" || return 1
   else
