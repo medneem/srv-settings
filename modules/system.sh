@@ -18,6 +18,23 @@ system_setup() {
   timedatectl status
 }
 
+# Reboot is never automatic: a separate yes/no confirmation is required.
+# The menu exits after the system accepts the reboot request.
+server_reboot() {
+  SRV_SETTINGS_REBOOT_REQUESTED=0
+  warn 'Перезагрузка сервера разорвёт текущий SSH-сеанс. Сохраните работу перед продолжением.'
+  if ! confirm 'Перезагрузить сервер сейчас?'; then
+    info 'Перезагрузка отменена.'
+    return 0
+  fi
+  info 'Отправляю команду перезагрузки сервера...'
+  if ! systemctl reboot; then
+    fail 'Не удалось отправить команду перезагрузки'
+    return 1
+  fi
+  SRV_SETTINGS_REBOOT_REQUESTED=1
+}
+
 system_menu() {
   local n
   while true; do

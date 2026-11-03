@@ -42,6 +42,7 @@ main_menu() {
     printf '6. Обновление системы / время\n'
     printf '7. Диагностика\n'
     printf '8. Дополнительные настройки\n'
+    printf '9. Перезагрузка сервера\n'
     printf '0. Выход\n'
     printf '=====================================\n'
     read_input 'Выбор: ' choice || { printf '\n'; return 0; }
@@ -54,8 +55,11 @@ main_menu() {
       6) system_menu;;
       7) diagnostics;;
       8) additional_menu;;
+      9) if server_reboot; then
+           [[ ${SRV_SETTINGS_REBOOT_REQUESTED:-0} == 1 ]] && return 0
+         fi;;
       0) info 'Выход'; return 0;;
-      *) warn 'Выберите пункт меню от 0 до 8';;
+      *) warn 'Выберите пункт меню от 0 до 9';;
     esac
   done
 }
