@@ -317,8 +317,18 @@ ssh_allowusers_cancel_rollback() {
   return 0
 }
 
+# A fresh SSH connection is still required after AllowUsers reloads, but
+# the same copy-ready command was already shown before the change.
+ssh_allowusers_post_apply_instructions() {
+  local username="$1"
+  warn 'AllowUsers применён: прежнее SSH-подключение не подтверждает доступ по новым правилам.'
+  info 'Откройте НОВОЕ независимое SSH-подключение во втором терминале, повторив ранее показанную SSH-команду.'
+  info "В новом сеансе выполните: whoami; sudo id -u (ожидаются $username и 0)."
+  attention 'Если вход не работает, НЕ закрывайте текущую сессию. Автооткат через 5 минут.'
+}
+
 ssh_allowusers_apply() {
-  local username="$1" cfg staged saved unit rollback status_effective port
+  local username="$1" cfg staged saved unit rollback status_effective
   local service_active=0 socket_active=0
   cfg="$(ssh_allowusers_config_path)"
   if [[ ! -f "$cfg" ]]; then
@@ -404,11 +414,7 @@ ssh_allowusers_apply() {
   fi
 
   info "AllowUsers $username записано в $cfg."
-  warn 'После применения AllowUsers повторно откройте НОВОЕ SSH-подключение во втором терминале:'
-  port="$(ssh_current_login_port)"
-  ssh_show_login_command "$username" "$port"
-  info "В новом сеансе выполните: whoami; sudo id -u (ожидаются $username и 0)."
-  attention 'Если вход не работает, НЕ закрывайте текущую сессию. Автооткат через 5 минут.'
+  ssh_allowusers_post_apply_instructions "$username"
   if confirm "Подтверждаете НОВЫЙ успешный SSH-вход $username с sudo (вывод 0)? (y отменяет откат)"; then
     if ssh_allowusers_cancel_rollback "$unit"; then
       success 'AllowUsers подтверждён; автоматический откат отменён.'
