@@ -659,6 +659,118 @@ test_ufw_remove_protects_ssh() (
   eq "$(cat "$logfile")" '--force delete allow 443/tcp'
 )
 
+
+# Old SSH UFW rules may be removed only after a *new* port has been verified.
+test_ssh_port_switch_marker_only_for_real_change() (
+  ssh_mark_confirmed_port_change 22 2203 || return 1
+  [[ "$SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT" == 22 ]] || return 1
+  [[ "$SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT" == 2203 ]] || return 1
+  ssh_mark_confirmed_port_change 2203 2203 || return 1
+  [[ -z "${SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT:-}" &&
+     -z "${SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT:-}" ]] || return 1
+  grep -Fq 'ssh_mark_confirmed_port_change "$oldport" "$newport"' "$BASE_DIR/modules/ssh.sh"
+)
+
+test_ufw_offers_cleanup_after_confirmed_ssh_switch() (
+  local dir prompts=0
+  dir="$(mktemp -d)"
+  trap 'rm -rf "$dir"' EXIT
+  SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT=22
+  SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT=2203
+  ssh_ports() { echo 2203; }
+  ufw() {
+    case "$*" in
+      'status') printf 'Status: active\n' ;;
+      'show added') printf 'Added user rules:\nufw allow 22/tcp\nufw allow 2203/tcp\nufw allow 443/tcp\n' ;;
+      *) printf '%s\n' "$*" >> "$dir/operations" ;;
+    esac
+  }
+  confirm() { ((prompts+=1)); [[ "$1" == *'22/tcp'* ]]; }
+  ufw_offer_close_previous_ssh_port 2203 >"$dir/output" 2>&1 || return 1
+  [[ "$prompts" == 1 ]] || return 1
+  grep -Fq '22/tcp' "$dir/output" || return 1
+  eq "$(cat "$dir/operations")" "$(printf '%s\n' '--force delete allow 22/tcp' 'status numbered')"
+)
+
+test_ufw_cleanup_declined_never_deletes() (
+  local prompts=0
+  SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT=22
+  SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT=2203
+  ssh_ports() { echo 2203; }
+  ufw() {
+    case "$*" in
+      'status') echo 'Status: active' ;;
+      'show added') printf 'ufw allow 22/tcp\nufw allow 2203/tcp\n' ;;
+      *) echo "Unexpected UFW mutation: $*" >&2; return 1 ;;
+    esac
+  }
+  confirm() { ((prompts+=1)); return 1; }
+  ufw_offer_close_previous_ssh_port 2203 || return 1
+  [[ "$prompts" == 1 ]]
+)
+
+test_ufw_cleanup_refuses_unconfirmed_or_mismatched_port() (
+  local calls=0
+  ufw() { ((calls+=1)); return 1; }
+  confirm() { echo 'Unexpected confirmation' >&2; return 1; }
+  ssh_ports() { echo 2203; }
+  unset SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT
+  ufw_offer_close_previous_ssh_port 2203 || return 1
+  SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT=22
+  SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT=2203
+  ufw_offer_close_previous_ssh_port 22 || return 1
+  [[ "$calls" == 0 ]]
+)
+
+test_ufw_cleanup_refuses_when_ssh_still_listens_on_22() (
+  local calls=0
+  SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT=22
+  SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT=2203
+  ssh_ports() { printf '22\n2203\n'; }
+  ufw() { ((calls+=1)); return 1; }
+  confirm() { echo 'Unexpected confirmation' >&2; return 1; }
+  ufw_offer_close_previous_ssh_port 2203 || return 1
+  [[ "$calls" == 0 ]]
+)
+
+test_ufw_cleanup_does_not_touch_specific_rules_or_inactive_ufw() (
+  local prompts=0 mode=inactive
+  SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT=22
+  SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT=2203
+  ssh_ports() { echo 2203; }
+  ufw() {
+    case "$*" in
+      'status')
+        if [[ "$mode" == inactive ]]; then echo 'Status: inactive'; else echo 'Status: active'; fi ;;
+      'show added')
+        printf '%s\n' 'ufw allow from 198.51.100.8 to any port 22 proto tcp' 'ufw allow 2203/tcp' ;;
+      *) echo 'Unexpected UFW mutation' >&2; return 1 ;;
+    esac
+  }
+  confirm() { ((prompts+=1)); return 1; }
+  ufw_offer_close_previous_ssh_port 2203 || return 1
+  mode=active
+  ufw_offer_close_previous_ssh_port 2203 || return 1
+  [[ "$prompts" == 0 ]]
+)
+
+test_ufw_cleanup_keeps_rule_if_new_port_not_allowed() (
+  local prompts=0
+  SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT=22
+  SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT=2203
+  ssh_ports() { echo 2203; }
+  ufw() {
+    case "$*" in
+      'status') echo 'Status: active' ;;
+      'show added') echo 'ufw allow 22/tcp' ;;
+      *) echo 'Unexpected UFW mutation' >&2; return 1 ;;
+    esac
+  }
+  confirm() { ((prompts+=1)); return 1; }
+  ufw_offer_close_previous_ssh_port 2203 >/dev/null 2>&1 || return 1
+  [[ "$prompts" == 0 ]]
+)
+
 test_ufw_initialization_order() (
   local logfile
   logfile="$(mktemp)"
