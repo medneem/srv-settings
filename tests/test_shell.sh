@@ -40,8 +40,8 @@ test_ui_log_levels_keep_streams_and_status() (
 )
 
 test_ui_color_codes_reset() (
-  local out yellow green blue reset
-  printf -v yellow '\033[1;33m'
+  local out orange green blue reset
+  printf -v orange '\033[1;38;5;208m'
   printf -v green '\033[1;32m'
   printf -v blue '\033[36m'
   printf -v reset '\033[0m'
@@ -53,9 +53,9 @@ test_ui_color_codes_reset() (
   out="$(success 'OK')" || return 1
   eq "$out" "${green}[ OK ]${reset} OK" || return 1
   out="$(warn 'Careful' 2>&1)" || return 1
-  eq "$out" "${yellow}[WARN]${reset} Careful" || return 1
+  eq "$out" "${orange}[WARN]${reset} Careful" || return 1
   out="$(attention 'Do not close SSH' 2>&1)" || return 1
-  eq "$out" "${yellow}[ВАЖНО] Do not close SSH${reset}" || return 1
+  eq "$out" "${orange}[WARN] Do not close SSH${reset}" || return 1
   out="$(section '3/6' 'SSH')" || return 1
   [[ "$out" == *"${blue}━━━ [ 3/6 ] SSH ━━━${reset}"* ]] || return 1
   out="$(ssh_command 2203 'admins@203.0.113.42')" || return 1
@@ -73,7 +73,7 @@ test_ui_no_color_and_dumb_term() (
   unset NO_COLOR
   TERM=dumb
   out="$(attention 'no ANSI' 2>&1)" || return 1
-  [[ "$out" == '[ВАЖНО] no ANSI' && "$out" != *"$esc"* ]]
+  [[ "$out" == '[WARN] no ANSI' && "$out" != *"$esc"* ]]
 )
 
 test_ui_redirected_output_is_plain() (
@@ -85,10 +85,12 @@ test_ui_redirected_output_is_plain() (
   unset NO_COLOR
   info 'Log' > "$dir/info"
   warn 'Warning' 2> "$dir/warn"
+  attention 'Critical' 2> "$dir/critical"
   ssh_command 22 'admins@example.com' > "$dir/ssh"
-  ! grep -q "$esc" "$dir/info" "$dir/warn" "$dir/ssh" || return 1
+  ! grep -q "$esc" "$dir/info" "$dir/warn" "$dir/critical" "$dir/ssh" || return 1
   grep -Fxq '[INFO] Log' "$dir/info" || return 1
   grep -Fxq '[WARN] Warning' "$dir/warn" || return 1
+  grep -Fxq '[WARN] Critical' "$dir/critical" || return 1
   grep -Fxq '    ssh -p 22 admins@example.com' "$dir/ssh"
 )
 
@@ -99,6 +101,10 @@ test_ui_full_setup_has_ordered_sections() (
     grep -oE 'section "[1-6]/6"' | cut -d'"' -f2)"
   eq "$sections" "$expected"
 )
+
+test_ui_no_legacy_important_label_in_shell_sources() {
+  ! grep -FRq 'ВАЖНО' "$BASE_DIR/modules" "$BASE_DIR/setup.sh"
+}
 
 test_ui_ssh_uses_command_and_attention_helpers() {
   local ssh="$BASE_DIR/modules/ssh.sh"
@@ -366,10 +372,15 @@ test_allowusers_login_command_without_detectable_ip() (
 )
 
 # After AllowUsers takes effect, the new session must be tested again.
-test_allowusers_post_apply_instructions_include_login_command() {
-  sed -n '/^ssh_allowusers_apply() {/,/^}/p' "$BASE_DIR/modules/ssh.sh" |
-    grep -Fq 'ssh_show_login_command "$username" "$port"'
-}
+test_allowusers_post_apply_reuses_first_ssh_command() (
+  local output
+  output="$(ssh_allowusers_post_apply_instructions admins 2>&1)" || return 1
+  [[ "$output" == *'повторив ранее показанную SSH-команду'* ]] || return 1
+  [[ "$output" == *'whoami; sudo id -u'* ]] || return 1
+  [[ "$output" == *'Автооткат через 5 минут'* ]] || return 1
+  [[ "$output" != *'ssh -p '* ]] || return 1
+  grep -Fq 'ssh_allowusers_post_apply_instructions "$username"' "$BASE_DIR/modules/ssh.sh"
+)
 
 test_allowusers_declined_never_changes_ssh() (
   confirm() { return 1; }
