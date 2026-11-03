@@ -53,9 +53,11 @@ test_ui_color_codes_reset() (
   out="$(success 'OK')" || return 1
   eq "$out" "${green}[ OK ]${reset} OK" || return 1
   out="$(warn 'Careful' 2>&1)" || return 1
-  eq "$out" "${orange}[WARN] Careful${reset}" || return 1
+  eq "$out" "${orange}[WARN]${reset} Careful" || return 1
   out="$(attention 'Do not close SSH' 2>&1)" || return 1
-  eq "$out" "${orange}[WARN] Do not close SSH${reset}" || return 1
+  eq "$out" "${orange}[WARN]${reset} Do not close SSH" || return 1
+  out="$(warn 'Осторожно, доступ к SSH!' 2>&1)" || return 1
+  eq "$out" "${orange}[WARN]${reset} Осторожно, доступ к SSH!" || return 1
   out="$(section '3/6' 'SSH')" || return 1
   [[ "$out" == *"${blue}━━━ [ 3/6 ] SSH ━━━${reset}"* ]] || return 1
   out="$(ssh_command 2203 'admins@203.0.113.42')" || return 1
