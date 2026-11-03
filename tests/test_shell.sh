@@ -53,9 +53,11 @@ test_ui_color_codes_reset() (
   out="$(success 'OK')" || return 1
   eq "$out" "${green}[ OK ]${reset} OK" || return 1
   out="$(warn 'Careful' 2>&1)" || return 1
-  eq "$out" "${orange}[WARN] Careful${reset}" || return 1
+  eq "$out" "${orange}[WARN]${reset} Careful" || return 1
   out="$(attention 'Do not close SSH' 2>&1)" || return 1
-  eq "$out" "${orange}[WARN] Do not close SSH${reset}" || return 1
+  eq "$out" "${orange}[WARN]${reset} Do not close SSH" || return 1
+  out="$(warn 'Осторожно, доступ к SSH!' 2>&1)" || return 1
+  eq "$out" "${orange}[WARN]${reset} Осторожно, доступ к SSH!" || return 1
   out="$(section '3/6' 'SSH')" || return 1
   [[ "$out" == *"${blue}━━━ [ 3/6 ] SSH ━━━${reset}"* ]] || return 1
   out="$(ssh_command 2203 'admins@203.0.113.42')" || return 1
@@ -367,6 +369,7 @@ test_user_create_offers_safe_allowusers_after_password() (
 )
 
 # The generated SSH command must be visible BEFORE the first AllowUsers prompt.
+# Confirm the tested SSH/sudo connection before asking whether to change AllowUsers.
 # Use the newly created user, not an ambiguous sudo group candidate.
 test_ssh_login_port_prefers_active_ssh_connection() (
   SSH_CONNECTION='198.51.100.7 53000 203.0.113.42 2203'
@@ -455,8 +458,34 @@ test_allowusers_shows_login_command_before_confirmation() (
   [[ "$transcript" == *'ssh -p 22 admins@203.0.113.42'* ]] || return 1
   [[ "$transcript" == *'whoami'* && "$transcript" == *'sudo id -u'* ]] || return 1
   command_line="$(grep -n -m1 -F 'ssh -p 22 admins@203.0.113.42' <<< "$transcript" | cut -d: -f1)"
-  prompt_line="$(grep -n -m1 -F 'PROMPT: Добавить admins' <<< "$transcript" | cut -d: -f1)"
-  [[ -n "$command_line" && -n "$prompt_line" && "$command_line" -lt "$prompt_line" ]]
+  prompt_line="$(grep -n -m1 -F 'PROMPT: Уже проверили вход admins' <<< "$transcript" | cut -d: -f1)"
+  [[ -n "$command_line" && -n "$prompt_line" && "$command_line" -lt "$prompt_line" ]] || return 1
+  [[ "$transcript" != *'PROMPT: Добавить admins'* ]]
+)
+
+test_allowusers_first_verifies_then_offers_to_apply() (
+  local transcript verification_line choice_line apply_line
+  ssh_current_login_port() { echo 22; }
+  ssh_show_login_command() { echo 'SSH COMMAND'; }
+  confirm() { printf 'PROMPT: %s\n' "$1"; return 0; }
+  ssh_allowusers_apply() { printf 'APPLY: %s\n' "$1"; }
+  transcript="$(ssh_allow_user_after_creation admins 2>&1)" || return 1
+  verification_line="$(grep -n -F 'PROMPT: Уже проверили вход admins' <<< "$transcript" | cut -d: -f1)"
+  choice_line="$(grep -n -F 'PROMPT: Добавить admins в глобальный AllowUsers' <<< "$transcript" | cut -d: -f1)"
+  apply_line="$(grep -n -F 'APPLY: admins' <<< "$transcript" | cut -d: -f1)"
+  [[ -n "$verification_line" && -n "$choice_line" && -n "$apply_line" ]] || return 1
+  (( verification_line < choice_line && choice_line < apply_line ))
+)
+
+test_allowusers_declined_after_successful_precheck_never_applies() (
+  local replies=0
+  confirm() {
+    ((replies+=1))
+    [[ "$1" == 'Уже проверили вход admins в ОТДЕЛЬНОМ SSH-сеансе и sudo (0)?' ]]
+  }
+  ssh_allowusers_apply() { echo 'UNEXPECTED APPLY' >&2; return 1; }
+  ssh_allow_user_after_creation admins >/dev/null 2>&1 || return 1
+  [[ "$replies" == 2 ]]
 )
 
 test_allowusers_login_command_without_detectable_ip() (
@@ -492,10 +521,14 @@ test_allowusers_declined_never_changes_ssh() (
 
 test_allowusers_requires_verified_second_session() (
   local replies=0
-  confirm() { ((replies+=1)); [[ "$replies" == 1 ]]; }
+  confirm() {
+    ((replies+=1))
+    [[ "$1" == 'Уже проверили вход admins в ОТДЕЛЬНОМ SSH-сеансе и sudo (0)?' ]] || return 1
+    return 1
+  }
   ssh_allowusers_apply() { echo "UNEXPECTED APPLY" >&2; return 1; }
   ssh_allow_user_after_creation admins || return 1
-  [[ "$replies" == 2 ]]
+  [[ "$replies" == 1 ]]
 )
 
 test_allowusers_uses_main_config_not_sshd_dropin() {

@@ -483,11 +483,11 @@ ssh_allow_user_after_creation() {
   printf '\n    whoami\n    sudo id -u\n\n'
   info "   Ожидается: $username и 0. При настроенном NOPASSWD пароль sudo не потребуется."
   warn 'Если вход не работает, отвечайте N. Изменять AllowUsers пока нельзя.'
-  confirm "Добавить $username в глобальный AllowUsers (/etc/ssh/sshd_config)?" || return 0
   confirm "Уже проверили вход $username в ОТДЕЛЬНОМ SSH-сеансе и sudo (0)?" || {
     warn 'AllowUsers не изменён до проверки входа.'
     return 0
   }
+  confirm "Добавить $username в глобальный AllowUsers (/etc/ssh/sshd_config)?" || return 0
   ssh_allowusers_apply "$username"
 }
 
