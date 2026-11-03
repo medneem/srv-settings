@@ -25,6 +25,38 @@ ufw_remove_ports() {
   done
 }
 
+# Offer to remove the old world-accessible SSH rule only after a verified
+# 22 -> non-22 switch in the current wizard run, with the new SSH port
+# configured, selected and allowed in active UFW. Do not touch scoped rules.
+ufw_offer_close_previous_ssh_port() {
+  local connected_port="$1" previous="${SRV_SETTINGS_CONFIRMED_SSH_OLD_PORT:-}"
+  local verified="${SRV_SETTINGS_CONFIRMED_SSH_NEW_PORT:-}" current status rules
+  [[ "$previous" == 22 && -n "$verified" && "$verified" != 22 &&
+     "$connected_port" == "$verified" ]] || return 0
+
+  current=" $(ssh_ports | tr '\n' ' ') "
+  # Never remove the old rule while sshd may still accept port 22.
+  [[ "$current" == *" $verified "* && "$current" != *" 22 "* ]] || {
+    warn 'SSH всё ещё использует 22/tcp или новый порт не подтверждён sshd; старое правило оставлено.'
+    return 0
+  }
+  status="$(ufw status)" || { warn 'Не удалось прочитать статус UFW; правило 22/tcp оставлено.'; return 0; }
+  # Without an active firewall, no firewall-protected login was verified.
+  grep -Fxq 'Status: active' <<< "$status" || return 0
+  rules="$(ufw show added)" || { warn 'Не удалось прочитать правила UFW; правило 22/tcp оставлено.'; return 0; }
+  grep -Fxq 'ufw allow 22/tcp' <<< "$rules" || return 0
+  if ! grep -Fxq "ufw allow $verified/tcp" <<< "$rules"; then
+    warn "В UFW отсутствует общее правило allow $verified/tcp; 22/tcp оставлен."
+    return 0
+  fi
+  warn "После подтверждённой смены SSH-порта с 22 на $verified старое правило UFW 22/tcp больше не требуется."
+  if confirm 'Удалить старое правило UFW allow 22/tcp (IPv4/IPv6)?'; then
+    ufw --force delete allow 22/tcp || { warn 'Не удалось удалить старое правило 22/tcp.'; return 1; }
+    success 'Старое правило UFW 22/tcp удалено.'
+    ufw status numbered
+  fi
+}
+
 ufw_setup() {
   packages ufw || return 1
   local p current
@@ -45,7 +77,8 @@ ufw_setup() {
     ufw default allow outgoing || return 1
     ufw --force enable || return 1
   fi
-  ufw status verbose
+  ufw status verbose || return 1
+  ufw_offer_close_previous_ssh_port "$connected_port"
 }
 
 ufw_menu() {
