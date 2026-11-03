@@ -871,7 +871,11 @@ test_fail2ban_setup_creates_global_ipv6_default_before_validation() (
     esac
   }
   systemctl() { [[ "$*" == 'enable fail2ban' || "$*" == 'restart fail2ban' ]]; }
-  fail2ban_setup >/dev/null 2>&1 || return 1
+  if ! fail2ban_setup > "$dir/setup-log" 2>&1; then
+    cat "$dir/setup-log" >&2
+    echo 'Failed setup in test_fail2ban_setup_creates_global_ipv6_default_before_validation() (' >&2
+    return 1
+  fi
   [[ "$(stat -c %a "$global")" == 644 ]] || return 1
   grep -Fxq '[Definition]' "$global" || return 1
   grep -Fxq 'allowipv6 = auto' "$global" || return 1
@@ -900,7 +904,11 @@ test_fail2ban_setup_does_not_override_user_ipv6_preference() (
     esac
   }
   systemctl() { [[ "$*" == 'enable fail2ban' || "$*" == 'restart fail2ban' ]]; }
-  fail2ban_setup >/dev/null 2>&1 || return 1
+  if ! fail2ban_setup > "$dir/setup-log" 2>&1; then
+    cat "$dir/setup-log" >&2
+    echo 'Failed setup in test_fail2ban_setup_does_not_override_user_ipv6_preference() (' >&2
+    return 1
+  fi
   [[ ! -e "$dir/fail2ban.d/90-srv-settings.local" ]] || return 1
   grep -Fxq 'allowipv6 = no' "$dir/fail2ban.local"
 )
