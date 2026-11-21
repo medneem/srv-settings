@@ -154,7 +154,7 @@ test_ui_ssh_uses_command_and_attention_helpers() {
   grep -Fq 'ssh_command "$port" "$SSH_LOGIN_TARGET"' "$ssh" &&
   grep -Fq 'ssh_command "$oldport" "$login_target"' "$ssh" &&
   grep -Fq 'ssh_command "$newport" "$login_target"' "$ssh" &&
-  grep -Fq "attention 'Текущая SSH-сессия должна оставаться открытой" "$ssh"
+  grep -Fq 'attention "Сейчас SSH будет временно перенастроен на порт $newport. НЕ закрывайте текущую SSH-сессию."' "$ssh"
 }
 
 test_full_setup_without_docker() (
