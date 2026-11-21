@@ -49,22 +49,32 @@ MOCK
 chmod +x "$temp/mock/curl"
 fake_sha=0123456789abcdef0123456789abcdef01234567
 receipt="$temp/receipt.txt"
-# The bootstrap comes from a pipe; setup.sh must read from /dev/tty.
-# 'script' creates the pseudoterminal that CI does not normally provide.
+# Legacy curl | sudo bash installation: do not launch an interactive menu. sudo
+# may not relay terminal input to a piped command when use_pty is configured.
+# 'script' supplies a pseudoterminal on otherwise non-interactive CI runners.
+timeout 12s script -q -e -c "cat '$BASE_DIR/bootstrap.sh' | sudo env PATH='$temp/mock:$PATH' TEST_ARCHIVE='$temp/fixture.tar.gz' TEST_FAKE_SHA='$fake_sha' TEST_RECEIPT='$receipt' bash" /dev/null \
+  > "$temp/legacy.log" 2>&1 || { cat "$temp/legacy.log" >&2; exit 1; }
+if [[ -e "$receipt" ]]; then
+  cat "$temp/legacy.log" >&2
+  echo "Legacy pipe unexpectedly started the interactive menu" >&2
+  exit 1
+fi
+grep -Fq 'sudo bash /opt/srv-settings/setup.sh' "$temp/legacy.log" || {
+  cat "$temp/legacy.log" >&2
+  echo 'Legacy pipe did not explain how to launch menu' >&2
+  exit 1
+}
+[[ "$(cat "$target/.installed-commit")" == "$fake_sha" ]]
+
+# In the recommended form sudo is the outer command and owns tty stdin, so
+# bootstrap may safely enter interactive setup after reading its script pipe.
 { sleep 1; printf 'tty-ok\n'; sleep 1; } |
-  script -q -e -c "cat '$BASE_DIR/bootstrap.sh' | sudo env PATH='$temp/mock:$PATH' TEST_ARCHIVE='$temp/fixture.tar.gz' TEST_FAKE_SHA='$fake_sha' TEST_RECEIPT='$receipt' bash" /dev/null \
-  > "$temp/output.log" 2>&1 || {
-    cat "$temp/output.log" >&2
-    exit 1
-  }
+  timeout 12s script -q -e -c "sudo env PATH='$temp/mock:$PATH' TEST_ARCHIVE='$temp/fixture.tar.gz' TEST_FAKE_SHA='$fake_sha' TEST_RECEIPT='$receipt' bash -c \"cat '$BASE_DIR/bootstrap.sh' | bash\"" /dev/null \
+  > "$temp/interactive.log" 2>&1 || { cat "$temp/interactive.log" >&2; exit 1; }
 if [[ "$(cat "$receipt" 2>/dev/null)" != tty-ok ]]; then
-  cat "$temp/output.log" >&2
-  echo "Menu did not read from the tty" >&2
+  cat "$temp/interactive.log" >&2
+  echo "Menu did not read from tty in the recommended form" >&2
   exit 1
 fi
-if [[ "$(cat "$target/.installed-commit" 2>/dev/null)" != "$fake_sha" ]]; then
-  echo "Installed revision did not match immutable archive" >&2
-  exit 1
-fi
-grep -Fq "$fake_sha" "$temp/output.log"
-printf 'bootstrap curl-pipe interactive smoke test: OK\n'
+grep -Fq "$fake_sha" "$temp/interactive.log"
+printf 'bootstrap pipe/sudo terminal regression smoke test: OK\n'

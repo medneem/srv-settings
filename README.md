@@ -7,10 +7,14 @@
 Подключитесь к серверу по SSH и выполните:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/medneem/srv-settings/main/bootstrap.sh | sudo bash
+sudo bash -c 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/medneem/srv-settings/main/bootstrap.sh | bash'
 ```
 
-Установщик загрузит актуальную версию в `/opt/srv-settings/` и откроет меню. Чтобы запустить его повторно:
+Сначала запускается `sudo` с доступом к терминалу, затем установщик скачивает актуальную версию в `/opt/srv-settings/` и открывает меню.
+
+Старая команда `curl -fsSL ... | sudo bash` также устанавливает файлы, но завершает работу без автоматического открытия меню: при `sudo use_pty` ввод может не дойти до скрипта, запущенного из конвейера. В этом случае запустите меню отдельно, выполнив команду ниже.
+
+Чтобы открыть меню повторно:
 
 ```bash
 sudo bash /opt/srv-settings/setup.sh

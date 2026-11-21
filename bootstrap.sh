@@ -55,5 +55,14 @@ printf '%s\n' "$commit_sha" > /opt/srv-settings/.installed-commit
 echo "Установлено в /opt/srv-settings (версия $commit_sha)"
 rm -rf -- "$tmp"
 trap - EXIT
-# При curl | sudo bash stdin содержит код bootstrap. Меню читает с терминала.
+# With "curl | sudo bash", sudo may use a separate PTY and no longer relay
+# keyboard input to setup.sh: sudo's own stdin is the download pipe.
+# Installation is complete, so leave a usable manual launch command instead
+# of entering a menu that can hang despite an available /dev/tty.
+if [[ ! -t 0 && "${SUDO_COMMAND:-}" != *' -c '* ]] &&
+   [[ "${SUDO_COMMAND:-}" =~ (^|[[:space:]])([^[:space:]]*/)?bash$ ]]; then
+  printf '\n[INFO] Для запуска интерактивного меню выполните:\n\n    sudo bash /opt/srv-settings/setup.sh\n'
+  exit 0
+fi
+# Direct root use, or sudo started outside the pipe, can read from /dev/tty.
 exec bash /opt/srv-settings/setup.sh </dev/tty
