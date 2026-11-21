@@ -1520,7 +1520,7 @@ test_ssh_apply_postcheck_copy_matches_rollback_flow() {
   saved_line="$(grep -nF "success 'SSH-настройки сохранены." "$ssh" | cut -d: -f1)"
   [[ -n "$yes_line" && -n "$cancel_line" && -n "$saved_line" ]] || return 1
   (( yes_line < cancel_line && cancel_line < saved_line ))
-)
+}
 
 passed=0
 failed=0
