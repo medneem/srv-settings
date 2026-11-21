@@ -413,7 +413,7 @@ test_ssh_root_preverified_skips_redundant_login_check() (
     ((confirms+=1))
     case "$confirms" in
       1) [[ "$1" == 'Отключить SSH-вход root (PermitRootLogin no)?' ]] ;;
-      2) [[ "$1" == 'Применить с автоматическим откатом через 5 минут?' ]]; return 1 ;;
+      2) [[ "$1" == 'Временно применить SSH-настройки для проверки (автооткат через 5 минут)?' ]]; return 1 ;;
       *) echo "Unexpected extra confirmation: $1" >&2; return 1 ;;
     esac
   }
@@ -1484,6 +1484,43 @@ test_modules_load() {
     declare -F "$name" >/dev/null || return 1
   done
 }
+
+# The first confirmation is only permission to apply changes temporarily.
+# No UFW or SSH mutation is allowed before that confirmation.
+test_ssh_apply_preview_explains_temporary_changes() (
+  local logfile
+  logfile="$(mktemp)"
+  trap 'rm -f "$logfile"' EXIT
+  packages() { return 0; }
+  ssh_current_login_port() { printf '22\n'; }
+  ask_port() { PORT=2203; }
+  ask() { REPLY=yes; }
+  confirm() { printf 'PROMPT: %s\n' "$1"; return 1; }
+  ufw() { echo 'Unexpected UFW change before confirmation' >&2; return 1; }
+
+  ssh_apply >"$logfile" 2>&1 || return 1
+  grep -Fq 'Планируемые SSH-настройки: port=2203' "$logfile" || return 1
+  grep -Fq 'временно перенастроен на порт 2203' "$logfile" || return 1
+  grep -Fq 'проверьте новый SSH-вход и sudo' "$logfile" || return 1
+  grep -Fq 'автоматический откат восстановит прежнюю конфигурацию' "$logfile" || return 1
+  grep -Fq 'PROMPT: Временно применить SSH-настройки для проверки (автооткат через 5 минут)?' "$logfile"
+)
+
+# Confirmation of a real new login is required before cancelling rollback.
+test_ssh_apply_postcheck_copy_matches_rollback_flow() {
+  local ssh="$BASE_DIR/modules/ssh.sh" yes_line cancel_line saved_line
+  grep -Fq "info 'В НОВОМ сеансе выполните: whoami (не root), sudo id -u (ожидается 0).'" "$ssh" || return 1
+  grep -Fq "warn 'Если вход не работает или sudo не выдаёт 0, ответьте N для немедленного отката.'" "$ssh" || return 1
+  grep -Fq "if confirm 'Новый SSH-вход и sudo (0) проверены? (y сохранит настройки и отменит автооткат)'; then" "$ssh" || return 1
+  grep -Fq "success 'Новый SSH-вход и sudo подтверждены.'" "$ssh" || return 1
+  grep -Fq "success 'Автоматический откат отменён.'" "$ssh" || return 1
+  grep -Fq "warn 'Новый SSH-вход не подтверждён. Восстанавливаем предыдущую SSH-конфигурацию.'" "$ssh" || return 1
+  yes_line="$(grep -nF "if confirm 'Новый SSH-вход и sudo (0) проверены?" "$ssh" | cut -d: -f1)"
+  cancel_line="$(grep -nF 'if ! ssh_allowusers_cancel_rollback "$unit"; then' "$ssh" | cut -d: -f1)"
+  saved_line="$(grep -nF "success 'SSH-настройки сохранены." "$ssh" | cut -d: -f1)"
+  [[ -n "$yes_line" && -n "$cancel_line" && -n "$saved_line" ]] || return 1
+  (( yes_line < cancel_line && cancel_line < saved_line ))
+)
 
 passed=0
 failed=0

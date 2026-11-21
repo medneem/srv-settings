@@ -246,9 +246,11 @@ ssh_apply() {
       fi
     fi
   fi
-  warn "Новые настройки: port=$newport, PasswordAuthentication=$passwd_mode, PermitRootLogin=$root_mode"
-  attention 'Текущая SSH-сессия должна оставаться открытой. Новый порт надо проверить во ВТОРОМ терминале.'
-  confirm 'Применить с автоматическим откатом через 5 минут?' || return 0
+  warn "Планируемые SSH-настройки: port=$newport, PasswordAuthentication=$passwd_mode, PermitRootLogin=$root_mode"
+  attention "Сейчас SSH будет временно перенастроен на порт $newport. НЕ закрывайте текущую SSH-сессию."
+  info 'После применения откройте ВТОРОЙ терминал и проверьте новый SSH-вход и sudo.'
+  warn 'Если новый вход не подтвердить за 5 минут, автоматический откат восстановит прежнюю конфигурацию.'
+  confirm 'Временно применить SSH-настройки для проверки (автооткат через 5 минут)?' || return 0
 
   # Открываем оба порта ДО перезапуска SSH; старые UFW-правила не удаляются.
   local p
@@ -314,7 +316,8 @@ ssh_apply() {
     return 1
   fi
 
-  info "SSH слушает $newport. В течение 5 минут проверьте НОВОЕ подключение из второго терминала:"
+  info "SSH слушает $newport. Настройки временно применены для проверки."
+  attention 'НЕ закрывайте текущую SSH-сессию. В течение 5 минут откройте ВТОРОЙ терминал:'
   if [[ -n "$login_target" ]]; then
     ssh_command "$newport" "$login_target"
   else
@@ -322,15 +325,19 @@ ssh_apply() {
     ssh_command "$newport" 'ПОЛЬЗОВАТЕЛЬ@АДРЕС_СЕРВЕРА'
     info "Новый SSH-порт: $newport"
   fi
-  if confirm 'Удалось войти в НОВОМ терминале по SSH? (yes отменяет автооткат)'; then
+  info 'В НОВОМ сеансе выполните: whoami (не root), sudo id -u (ожидается 0).'
+  warn 'Если вход не работает или sudo не выдаёт 0, ответьте N для немедленного отката.'
+  if confirm 'Новый SSH-вход и sudo (0) проверены? (y сохранит настройки и отменит автооткат)'; then
     if ! ssh_allowusers_cancel_rollback "$unit"; then
       warn 'Таймер отката SSH не отменён надёжно; старые правила UFW удалять нельзя.'
       return 1
     fi
     ssh_mark_confirmed_port_change "$oldport" "$newport"
-    success 'Настройки сохранены. Старые порты UFW НЕ удалены; их можно закрыть позже вручную.'
+    success 'Новый SSH-вход и sudo подтверждены.'
+    success 'Автоматический откат отменён.'
+    success 'SSH-настройки сохранены. Старые порты UFW НЕ удалены; их можно закрыть позже вручную.'
   else
-    warn 'Восстановление предыдущей SSH-конфигурации'
+    warn 'Новый SSH-вход не подтверждён. Восстанавливаем предыдущую SSH-конфигурацию.'
     bash "$rollback" || warn "Ручное восстановление: bash $rollback"
     systemctl stop "$unit.timer" || true
   fi
